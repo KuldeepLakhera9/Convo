@@ -5,12 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "prebuild": "npm --prefix ../.. run build --workspace=@convo/shared",
     "build": "tsc -b && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@convo/shared": "*",
     "lucide-react": "^0.395.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
