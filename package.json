@@ -1,0 +1,15 @@
+{
+  "name": "convo-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/shared",
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=@convo/shared & npm run dev --workspace=api & npm run dev --workspace=web",
+    "build": "npm run build --workspaces --if-present",
+    "db:generate": "npm run db:generate --workspace=apps/api",
+    "db:migrate": "npm run db:migrate --workspace=apps/api"
+  }
+}
