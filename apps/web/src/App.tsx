@@ -8,7 +8,6 @@ import {
   Plus,
   Loader2,
   AlertCircle,
-  CheckCircle2,
   Search,
   Settings,
   Bell,
@@ -22,6 +21,9 @@ import {
   Image,
   Link2,
   FileText,
+  Check,
+  CheckCheck,
+  WifiOff,
 } from 'lucide-react';
 
 function parseJwt(token: string) {
@@ -88,6 +90,7 @@ export default function App() {
     setActiveConversationId,
     activeMessages,
     isConnected,
+    isSyncing,
     sendMessage,
     startConversation,
   } = useChat({
@@ -332,429 +335,461 @@ export default function App() {
 
   // MAIN DASHBOARD SCREEN
   return (
-    <div className="flex h-screen w-screen bg-[#0b0c0f] overflow-hidden p-3 gap-3">
-      {/* COLUMN 1: Far Left Slim Workspace Bar (~72px) */}
-      <nav className="w-[72px] dribbble-panel rounded-2xl flex flex-col items-center py-4 justify-between shrink-0 shadow-lg">
-        {/* Convo Branding Icon */}
-        <div className="flex flex-col items-center gap-6">
-          <div className="h-10 w-10 rounded-xl bg-[#ddfd53] text-[#0b0c0f] flex items-center justify-center font-black text-lg shadow-md shadow-[#ddfd53]/10">
-            S
+    <div className="flex flex-col h-screen w-screen bg-[#0b0c0f] overflow-hidden p-3 gap-3">
+      {/* Network offline/syncing header warning banner */}
+      {!isConnected && (
+        <div className="w-full py-2 px-4 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-between text-xs text-amber-400 tracking-wide transition-all duration-300">
+          <div className="flex items-center gap-2 font-medium">
+            <WifiOff className="h-4 w-4 animate-pulse" />
+            <span>Connection lost. Typing messages will queue offline and automatically sync upon reconnecting.</span>
           </div>
-
-          {/* Fake Workspace Channels */}
-          <div className="flex flex-col items-center gap-3">
-            <button className="h-10 w-10 rounded-full border border-slate-700 bg-slate-800 text-[10px] font-bold text-slate-300 hover:border-slate-500 hover:text-white transition-all cursor-pointer">
-              Work
-            </button>
-            <button className="h-10 w-10 rounded-full border border-[#ddfd53] bg-[#ddfd53]/10 text-[10px] font-bold text-[#ddfd53] transition-all cursor-pointer">
-              ICG
-            </button>
-            <button className="h-10 w-10 rounded-full border border-slate-800 bg-[#18191e] text-[10px] font-bold text-[#989ba2] hover:border-slate-700 hover:text-white transition-all cursor-pointer">
-              SP
-            </button>
-            <button className="h-10 w-10 rounded-full border border-slate-800 bg-[#18191e] text-[10px] font-bold text-[#989ba2] hover:border-slate-700 hover:text-white transition-all cursor-pointer">
-              BFF
-            </button>
-            <button className="h-10 w-10 rounded-full border border-slate-800 bg-[#18191e] text-[10px] font-bold text-[#989ba2] hover:border-slate-700 hover:text-white transition-all cursor-pointer">
-              MJ
-            </button>
-            <button className="h-10 w-10 rounded-full border border-slate-800 bg-[#18191e] text-[10px] font-bold text-[#989ba2] hover:border-slate-700 hover:text-white transition-all cursor-pointer">
-              GI
-            </button>
+          <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-amber-500/20">
+            Offline Mode
+          </span>
+        </div>
+      )}
+      
+      {isSyncing && (
+        <div className="w-full py-2 px-4 rounded-xl bg-indigo-500/10 border border-indigo-500/25 flex items-center justify-between text-xs text-indigo-400 tracking-wide transition-all duration-300">
+          <div className="flex items-center gap-2 font-medium">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>Synchronizing history and replaying missed messages...</span>
           </div>
         </div>
+      )}
 
-        {/* Action icons at the bottom */}
-        <div className="flex flex-col items-center gap-4">
-          <button
-            onClick={handleOpenUserSearch}
-            title="Start Conversation"
-            className="h-10 w-10 rounded-full bg-[#ddfd53] text-[#0b0c0f] flex items-center justify-center hover:bg-[#cbe64c] transition-all cursor-pointer"
-          >
-            <Plus className="h-5 w-5" />
-          </button>
-          <button className="text-[#989ba2] hover:text-white transition-colors cursor-pointer">
-            <Settings className="h-5 w-5" />
-          </button>
-        </div>
-      </nav>
-
-      {/* COLUMN 2: Chats Directory Pane (~280px) */}
-      <aside className="w-[280px] dribbble-panel rounded-2xl flex flex-col overflow-hidden shadow-lg shrink-0">
-        {/* Search Header */}
-        <div className="p-4 border-b border-[#24262d]">
-          <div className="relative">
-            <Search className="absolute left-3.5 top-3 h-4 w-4 text-[#5c5e66]" />
-            <input
-              type="text"
-              placeholder="Search chats"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full rounded-xl bg-[#18191e] border border-[#24262d] pl-9 pr-4 py-2 text-xs text-white placeholder-[#5c5e66] focus:outline-none focus:border-[#ddfd53] transition-colors"
-            />
-          </div>
-        </div>
-
-        {/* Directory Contacts list */}
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          <div className="px-2 py-1 text-[10px] font-bold text-[#5c5e66] uppercase tracking-wider">
-            Direct Messages
-          </div>
-          
-          {filteredConversations.length === 0 ? (
-            <div className="text-center py-8 text-xs text-[#5c5e66]">No chats found</div>
-          ) : (
-            filteredConversations.map((conv) => {
-              const isActive = conv.id === activeConversationId;
-              const userInitials = getInitials(conv.otherUser?.email || 'User');
-              return (
-                <button
-                  key={conv.id}
-                  onClick={() => setActiveConversationId(conv.id)}
-                  className={`w-full flex items-center gap-3 rounded-xl p-3 text-left transition-all border cursor-pointer ${
-                    isActive
-                      ? 'bg-[#24262d] border-[#24262d]'
-                      : 'bg-transparent border-transparent hover:bg-[#18191e]/50'
-                  }`}
-                >
-                  {/* Initials Avatar badge */}
-                  <div className="h-9 w-9 rounded-full bg-[#18191e] border border-[#24262d] flex items-center justify-center font-bold text-[10px] text-slate-300 relative shrink-0">
-                    {userInitials}
-                    <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 border-2 border-[#131419]" />
-                  </div>
-                  
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-white truncate pr-1">
-                        {conv.otherUser?.email.split('@')[0]}
-                      </span>
-                      <span className="text-[9px] text-[#5c5e66]">Active</span>
-                    </div>
-                    <p className="text-[10px] text-[#989ba2] truncate mt-0.5">
-                      {conv.otherUser?.email}
-                    </p>
-                  </div>
-                </button>
-              );
-            })
-          )}
-        </div>
-
-        {/* Current User Card */}
-        <div className="p-3 border-t border-[#24262d] bg-[#18191e]/40 flex items-center justify-between">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="h-8 w-8 rounded-full bg-[#ddfd53] text-[#0b0c0f] flex items-center justify-center font-black text-xs shrink-0">
-              {user.email.substring(0, 2).toUpperCase()}
+      {/* Outer Workspace Layout */}
+      <div className="flex-1 flex gap-3 min-h-0 overflow-hidden">
+        {/* COLUMN 1: Far Left Slim Workspace Bar (~72px) */}
+        <nav className="w-[72px] dribbble-panel rounded-2xl flex flex-col items-center py-4 justify-between shrink-0 shadow-lg bg-[#131419]">
+          {/* Convo Branding Icon */}
+          <div className="flex flex-col items-center gap-6">
+            <div className="h-10 w-10 rounded-xl bg-[#ddfd53] text-[#0b0c0f] flex items-center justify-center font-black text-lg shadow-md shadow-[#ddfd53]/10">
+              S
             </div>
-            <div className="min-w-0">
-              <span className="block text-xs font-bold text-white truncate">
-                {user.email.split('@')[0]}
-              </span>
-              <span className="block text-[10px] text-[#989ba2] truncate">{user.email}</span>
+
+            {/* Fake Workspace Channels */}
+            <div className="flex flex-col items-center gap-3">
+              <button className="h-10 w-10 rounded-full border border-slate-700 bg-slate-800 text-[10px] font-bold text-slate-300 hover:border-slate-500 hover:text-white transition-all cursor-pointer">
+                Work
+              </button>
+              <button className="h-10 w-10 rounded-full border border-[#ddfd53] bg-[#ddfd53]/10 text-[10px] font-bold text-[#ddfd53] transition-all cursor-pointer">
+                ICG
+              </button>
+              <button className="h-10 w-10 rounded-full border border-slate-800 bg-[#18191e] text-[10px] font-bold text-[#989ba2] hover:border-slate-700 hover:text-white transition-all cursor-pointer">
+                SP
+              </button>
+              <button className="h-10 w-10 rounded-full border border-slate-800 bg-[#18191e] text-[10px] font-bold text-[#989ba2] hover:border-slate-700 hover:text-white transition-all cursor-pointer">
+                BFF
+              </button>
+              <button className="h-10 w-10 rounded-full border border-slate-800 bg-[#18191e] text-[10px] font-bold text-[#989ba2] hover:border-slate-700 hover:text-white transition-all cursor-pointer">
+                MJ
+              </button>
+              <button className="h-10 w-10 rounded-full border border-slate-800 bg-[#18191e] text-[10px] font-bold text-[#989ba2] hover:border-slate-700 hover:text-white transition-all cursor-pointer">
+                GI
+              </button>
             </div>
           </div>
-          <button
-            onClick={handleLogout}
-            title="Log Out"
-            className="text-[#989ba2] hover:text-red-400 p-1.5 rounded-lg hover:bg-red-500/10 transition-all cursor-pointer"
-          >
-            <LogOut className="h-4.5 w-4.5" />
-          </button>
-        </div>
-      </aside>
 
-      {/* COLUMN 3: Central Chat Messages viewport */}
-      <main className="flex-1 dribbble-panel rounded-2xl flex flex-col overflow-hidden shadow-lg">
-        {activeConversation ? (
-          <>
-            {/* Chat Pane Header */}
-            <header className="h-16 border-b border-[#24262d] px-6 flex items-center justify-between shrink-0 bg-[#18191e]/15">
-              <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-full bg-[#18191e] border border-[#24262d] flex items-center justify-center font-bold text-xs text-white">
-                  {getInitials(activeConversation.otherUser?.email || 'User')}
-                </div>
-                <div>
-                  <h2 className="text-xs font-bold text-white m-0">
-                    {activeConversation.otherUser?.email}
-                  </h2>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className={`h-1.5 w-1.5 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse-subtle'}`} />
-                    <span className="text-[9px] text-[#989ba2]">
-                      {isConnected ? 'Active channel' : 'reconnecting...'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Utility header controls */}
-              <div className="flex items-center gap-3">
-                <div className="relative w-44">
-                  <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-[#5c5e66]" />
-                  <input
-                    type="text"
-                    placeholder="Search thread"
-                    className="w-full rounded-lg bg-[#18191e] border border-[#24262d] pl-8 pr-3 py-1.5 text-[10px] text-white focus:outline-none focus:border-[#ddfd53] transition-colors"
-                  />
-                </div>
-                <button className="text-[#989ba2] hover:text-white cursor-pointer"><Bell className="h-4 w-4" /></button>
-                <button
-                  onClick={() => setShowRightSidebar(!showRightSidebar)}
-                  className={`text-[#989ba2] hover:text-white cursor-pointer ${showRightSidebar ? 'text-white' : ''}`}
-                >
-                  <Users className="h-4 w-4" />
-                </button>
-              </div>
-            </header>
-
-            {/* Chat Messages Log */}
-            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
-              
-              {/* Premium Shared Space Banner (matching screenshot mockup) */}
-              <div className="rounded-xl overflow-hidden dribbble-card border border-[#24262d]">
-                <div className="relative h-28 bg-[#1f2028] overflow-hidden flex items-center justify-center">
-                  {/* Mock scenic image representing premium game/landscape banner */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent z-10" />
-                  <img
-                    src="/Users/kuldeeplakhera/.gemini/antigravity-ide/brain/b913b2bd-a9aa-4e7a-9ace-95252c505a7b/initial_page_1783918540828.png"
-                    alt="Shared banner"
-                    onError={(e) => {
-                      // Fallback if path doesn't load
-                      e.currentTarget.src = "https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=600&auto=format&fit=crop&q=60";
-                    }}
-                    className="w-full h-full object-cover opacity-60"
-                  />
-                  <div className="absolute bottom-3 left-4 z-20">
-                    <span className="text-[10px] font-bold bg-[#ddfd53] text-[#0b0c0f] px-2 py-0.5 rounded-full uppercase tracking-wider">
-                      Shared Banner
-                    </span>
-                    <h4 className="text-xs font-bold text-white mt-1">Convo secure workspace space initialized</h4>
-                  </div>
-                </div>
-              </div>
-
-              {/* Date separator divider */}
-              <div className="flex items-center justify-center my-6">
-                <div className="h-px bg-[#24262d] flex-1" />
-                <span className="px-3 py-1 rounded-full bg-[#18191e] border border-[#24262d] text-[9px] font-bold text-[#989ba2] uppercase tracking-wider">
-                  Timeline
-                </span>
-                <div className="h-px bg-[#24262d] flex-1" />
-              </div>
-
-              {activeMessages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-10 text-center">
-                  <p className="text-xs text-[#5c5e66]">No messages yet. Type in the input below to begin chat.</p>
-                </div>
-              ) : (
-                activeMessages.map((msg) => {
-                  const isMe = msg.senderId === user.id;
-                  const isPending = msg.isPending;
-                  const isFailed = msg.isFailed;
-                  const initials = isMe ? getInitials(user.email) : getInitials(activeConversation.otherUser?.email || 'User');
-
-                  return (
-                    /* Dribbble Slack/Discord style inline layout (no bubble wrappers!) */
-                    <div key={msg.id} className="flex items-start gap-3.5 group">
-                      {/* User Avatar */}
-                      <div className={`h-8 w-8 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 border ${
-                        isMe ? 'bg-[#ddfd53] text-[#0b0c0f] border-[#ddfd53]/10' : 'bg-[#18191e] text-slate-300 border-[#24262d]'
-                      }`}>
-                        {initials}
-                      </div>
-
-                      {/* Message Content block */}
-                      <div className="flex-1 min-w-0">
-                        {/* Header details */}
-                        <div className="flex items-baseline gap-2">
-                          <span className="text-xs font-bold text-white hover:underline cursor-pointer">
-                            {isMe ? user.email.split('@')[0] : activeConversation.otherUser?.email.split('@')[0]}
-                          </span>
-                          <span className="text-[9px] text-[#5c5e66]">
-                            {new Date(msg.createdAt).toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </span>
-                          
-                          {/* Monotonic sequence tag with custom styling */}
-                          <span className="text-[9px] font-mono text-[#ddfd53]/60 bg-[#ddfd53]/5 px-1.5 py-0.5 rounded border border-[#ddfd53]/10">
-                            #{msg.sequenceId > 0 && msg.sequenceId < 1e11 ? msg.sequenceId : 'pending'}
-                          </span>
-                        </div>
-
-                        {/* Content text */}
-                        <div className={`text-xs text-[#f1f5f9] mt-1 break-words leading-relaxed whitespace-pre-wrap ${
-                          isPending ? 'opacity-50 italic' : ''
-                        } ${isFailed ? 'text-red-400' : ''}`}>
-                          {msg.content}
-                        </div>
-                      </div>
-
-                      {/* Status Check indicators */}
-                      {isMe && (
-                        <div className="self-center shrink-0">
-                          {isPending ? (
-                            <Loader2 className="h-3 w-3 animate-spin text-[#ddfd53]" />
-                          ) : isFailed ? (
-                            <AlertCircle className="h-3 w-3 text-red-500" />
-                          ) : (
-                            <CheckCircle2 className="h-3 w-3 text-[#ddfd53]/80" />
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Input Message panel */}
-            <div className="p-4 border-t border-[#24262d] bg-[#131419]/35 shrink-0">
-              <form onSubmit={handleSend} className="max-w-4xl mx-auto flex items-center gap-3 rounded-2xl bg-[#18191e] border border-[#24262d] px-4 py-2">
-                <button type="button" className="text-[#989ba2] hover:text-white p-1.5 rounded-lg transition-colors cursor-pointer">
-                  <Paperclip className="h-4.5 w-4.5" />
-                </button>
-                <input
-                  type="text"
-                  value={inputMessage}
-                  onChange={(e) => setInputMessage(e.target.value)}
-                  placeholder={`Write a message to ${activeConversation.otherUser?.email.split('@')[0]}...`}
-                  className="flex-1 bg-transparent border-none py-2 text-xs text-white placeholder-[#5c5e66] focus:outline-none custom-input"
-                />
-                <button
-                  type="submit"
-                  disabled={!inputMessage.trim()}
-                  className="h-9 w-9 rounded-xl bg-[#ddfd53] hover:bg-[#cbe64c] disabled:opacity-30 disabled:hover:bg-[#ddfd53] text-[#0b0c0f] flex items-center justify-center transition-all cursor-pointer shrink-0"
-                >
-                  <Send className="h-4 w-4" />
-                </button>
-              </form>
-            </div>
-          </>
-        ) : (
-          /* Empty Active Chat Panel */
-          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-            <div className="h-14 w-14 rounded-2xl bg-[#18191e] border border-[#24262d] flex items-center justify-center mb-4">
-              <MessageSquare className="h-6 w-6 text-[#ddfd53]" />
-            </div>
-            <h2 className="text-sm font-bold text-white m-0">No active thread</h2>
-            <p className="text-xs text-[#989ba2] max-w-xs mt-1.5 leading-relaxed">
-              Select a conversation in the directory list, or click the **`+`** icon to search and initiate a discussion.
-            </p>
+          {/* Action icons at the bottom */}
+          <div className="flex flex-col items-center gap-4">
+            <button
+              onClick={handleOpenUserSearch}
+              title="Start Conversation"
+              className="h-10 w-10 rounded-full bg-[#ddfd53] text-[#0b0c0f] flex items-center justify-center hover:bg-[#cbe64c] transition-all cursor-pointer animate-pulse-subtle"
+            >
+              <Plus className="h-5 w-5" />
+            </button>
+            <button className="text-[#989ba2] hover:text-white transition-colors cursor-pointer">
+              <Settings className="h-5 w-5" />
+            </button>
           </div>
-        )}
-      </main>
+        </nav>
 
-      {/* COLUMN 4: Right Context details sidebar (~280px, toggled) */}
-      {activeConversation && showRightSidebar && (
+        {/* COLUMN 2: Chats Directory Pane (~280px) */}
         <aside className="w-[280px] dribbble-panel rounded-2xl flex flex-col overflow-hidden shadow-lg shrink-0 bg-[#131419]">
-          {/* Quick actions bar */}
-          <div className="p-4 border-b border-[#24262d] flex items-center justify-around bg-[#18191e]/20">
-            <button className="h-8 w-8 rounded-full bg-[#ddfd53]/10 border border-[#ddfd53]/25 flex items-center justify-center text-[#ddfd53] hover:bg-[#ddfd53]/20 transition-all cursor-pointer">
-              <Phone className="h-3.5 w-3.5" />
-            </button>
-            <button className="h-8 w-8 rounded-full bg-[#18191e] border border-[#24262d] flex items-center justify-center text-slate-300 hover:text-white transition-all cursor-pointer">
-              <Video className="h-3.5 w-3.5" />
-            </button>
-            <button className="h-8 w-8 rounded-full bg-[#18191e] border border-[#24262d] flex items-center justify-center text-slate-300 hover:text-white transition-all cursor-pointer">
-              <Pin className="h-3.5 w-3.5" />
-            </button>
-          </div>
-
-          {/* Members list */}
+          {/* Search Header */}
           <div className="p-4 border-b border-[#24262d]">
-            <h3 className="text-xs font-bold text-white mb-3">Members</h3>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="h-7 w-7 rounded-full bg-[#18191e] border border-[#24262d] flex items-center justify-center font-bold text-[10px] text-white shrink-0">
-                    {getInitials(activeConversation.otherUser?.email)}
-                  </div>
-                  <span className="text-xs font-semibold text-slate-300 truncate">
-                    {activeConversation.otherUser?.email.split('@')[0]}
-                  </span>
-                </div>
-                <span className="text-[9px] font-bold text-[#5c5e66] uppercase">Member</span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="h-7 w-7 rounded-full bg-[#ddfd53] text-[#0b0c0f] flex items-center justify-center font-bold text-[10px] shrink-0">
-                    {getInitials(user.email)}
-                  </div>
-                  <span className="text-xs font-semibold text-slate-300 truncate">
-                    {user.email.split('@')[0]} (You)
-                  </span>
-                </div>
-                <span className="text-[9px] font-bold text-[#ddfd53] uppercase">Admin</span>
-              </div>
+            <div className="relative">
+              <Search className="absolute left-3.5 top-3 h-4 w-4 text-[#5c5e66]" />
+              <input
+                type="text"
+                placeholder="Search chats"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full rounded-xl bg-[#18191e] border border-[#24262d] pl-9 pr-4 py-2 text-xs text-white placeholder-[#5c5e66] focus:outline-none focus:border-[#ddfd53] transition-colors"
+              />
             </div>
           </div>
 
-          {/* Files Accordion */}
-          <div className="border-b border-[#24262d]">
-            <button
-              onClick={() => setFilesOpen(!filesOpen)}
-              className="w-full flex items-center justify-between p-4 text-xs font-bold text-white hover:bg-[#18191e]/40 transition-colors cursor-pointer"
-            >
-              <span>Files</span>
-              {filesOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            </button>
+          {/* Directory Contacts list */}
+          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            <div className="px-2 py-1 text-[10px] font-bold text-[#5c5e66] uppercase tracking-wider">
+              Direct Messages
+            </div>
             
-            {filesOpen && (
-              <div className="px-4 pb-4 space-y-2">
-                <div className="flex items-center gap-2.5 rounded-lg bg-[#18191e]/40 p-2 border border-[#24262d]/50 text-left">
-                  <div className="h-7 w-7 rounded bg-[#24262d] flex items-center justify-center shrink-0">
-                    <FileText className="h-4 w-4 text-indigo-400" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[10px] font-semibold text-slate-300 truncate">project_spec.pdf</p>
-                    <p className="text-[9px] text-[#5c5e66]">1.2 MB • PDF Document</p>
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-2.5 rounded-lg bg-[#18191e]/40 p-2 border border-[#24262d]/50 text-left">
-                  <div className="h-7 w-7 rounded bg-[#24262d] flex items-center justify-center shrink-0">
-                    <Image className="h-4 w-4 text-emerald-400" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[10px] font-semibold text-slate-300 truncate">design_reference.png</p>
-                    <p className="text-[9px] text-[#5c5e66]">3.4 MB • PNG Image</p>
-                  </div>
-                </div>
-              </div>
+            {filteredConversations.length === 0 ? (
+              <div className="text-center py-8 text-xs text-[#5c5e66]">No chats found</div>
+            ) : (
+              filteredConversations.map((conv) => {
+                const isActive = conv.id === activeConversationId;
+                const userInitials = getInitials(conv.otherUser?.email || 'User');
+                return (
+                  <button
+                    key={conv.id}
+                    onClick={() => setActiveConversationId(conv.id)}
+                    className={`w-full flex items-center gap-3 rounded-xl p-3 text-left transition-all border cursor-pointer ${
+                      isActive
+                        ? 'bg-[#24262d] border-[#24262d]'
+                        : 'bg-transparent border-transparent hover:bg-[#18191e]/50'
+                    }`}
+                  >
+                    {/* Initials Avatar badge */}
+                    <div className="h-9 w-9 rounded-full bg-[#18191e] border border-[#24262d] flex items-center justify-center font-bold text-[10px] text-slate-300 relative shrink-0">
+                      {userInitials}
+                      <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 border-2 border-[#131419]" />
+                    </div>
+                    
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-white truncate pr-1">
+                          {conv.otherUser?.email.split('@')[0]}
+                        </span>
+                        <span className="text-[9px] text-[#5c5e66]">Active</span>
+                      </div>
+                      <p className="text-[10px] text-[#989ba2] truncate mt-0.5">
+                        {conv.otherUser?.email}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })
             )}
           </div>
 
-          {/* Links Accordion */}
-          <div className="border-b border-[#24262d]">
-            <button
-              onClick={() => setLinksOpen(!linksOpen)}
-              className="w-full flex items-center justify-between p-4 text-xs font-bold text-white hover:bg-[#18191e]/40 transition-colors cursor-pointer"
-            >
-              <span>Shared links</span>
-              {linksOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            </button>
-
-            {linksOpen && (
-              <div className="px-4 pb-4 space-y-2">
-                <div className="flex items-center gap-2 rounded-lg bg-[#18191e]/40 p-2 border border-[#24262d]/50 text-left">
-                  <Link2 className="h-3.5 w-3.5 text-[#ddfd53] shrink-0" />
-                  <a
-                    href="https://dribbble.com"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[10px] text-slate-300 truncate hover:underline"
-                  >
-                    https://dribbble.com/shots/24911746
-                  </a>
-                </div>
+          {/* Current User Card */}
+          <div className="p-3 border-t border-[#24262d] bg-[#18191e]/40 flex items-center justify-between">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="h-8 w-8 rounded-full bg-[#ddfd53] text-[#0b0c0f] flex items-center justify-center font-black text-xs shrink-0">
+                {user.email.substring(0, 2).toUpperCase()}
               </div>
-            )}
+              <div className="min-w-0">
+                <span className="block text-xs font-bold text-white truncate">
+                  {user.email.split('@')[0]}
+                </span>
+                <span className="block text-[10px] text-[#989ba2] truncate">{user.email}</span>
+              </div>
+            </div>
+            <button
+              onClick={handleLogout}
+              title="Log Out"
+              className="text-[#989ba2] hover:text-red-400 p-1.5 rounded-lg hover:bg-red-500/10 transition-all cursor-pointer"
+            >
+              <LogOut className="h-4.5 w-4.5" />
+            </button>
           </div>
         </aside>
-      )}
+
+        {/* COLUMN 3: Central Chat Messages viewport */}
+        <main className="flex-1 dribbble-panel rounded-2xl flex flex-col overflow-hidden shadow-lg bg-[#131419]">
+          {activeConversation ? (
+            <>
+              {/* Chat Pane Header */}
+              <header className="h-16 border-b border-[#24262d] px-6 flex items-center justify-between shrink-0 bg-[#18191e]/15">
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-full bg-[#18191e] border border-[#24262d] flex items-center justify-center font-bold text-xs text-white">
+                    {getInitials(activeConversation.otherUser?.email || 'User')}
+                  </div>
+                  <div>
+                    <h2 className="text-xs font-bold text-white m-0">
+                      {activeConversation.otherUser?.email}
+                    </h2>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className={`h-1.5 w-1.5 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse-subtle'}`} />
+                      <span className="text-[9px] text-[#989ba2]">
+                        {isConnected ? 'Active channel' : 'Offline • attempting reconnect...'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Utility header controls */}
+                <div className="flex items-center gap-3">
+                  <div className="relative w-44">
+                    <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-[#5c5e66]" />
+                    <input
+                      type="text"
+                      placeholder="Search thread"
+                      className="w-full rounded-lg bg-[#18191e] border border-[#24262d] pl-8 pr-3 py-1.5 text-[10px] text-white focus:outline-none focus:border-[#ddfd53] transition-colors"
+                    />
+                  </div>
+                  <button className="text-[#989ba2] hover:text-white cursor-pointer"><Bell className="h-4 w-4" /></button>
+                  <button
+                    onClick={() => setShowRightSidebar(!showRightSidebar)}
+                    className={`text-[#989ba2] hover:text-white cursor-pointer ${showRightSidebar ? 'text-white' : ''}`}
+                  >
+                    <Users className="h-4 w-4" />
+                  </button>
+                </div>
+              </header>
+
+              {/* Chat Messages Log */}
+              <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
+                {/* Premium Shared Space Banner */}
+                <div className="rounded-xl overflow-hidden dribbble-card border border-[#24262d]">
+                  <div className="relative h-28 bg-[#1f2028] overflow-hidden flex items-center justify-center">
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent z-10" />
+                    <img
+                      src="/Users/kuldeeplakhera/.gemini/antigravity-ide/brain/b913b2bd-a9aa-4e7a-9ace-95252c505a7b/initial_page_1783918540828.png"
+                      alt="Shared banner"
+                      onError={(e) => {
+                        e.currentTarget.src = "https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=600&auto=format&fit=crop&q=60";
+                      }}
+                      className="w-full h-full object-cover opacity-60"
+                    />
+                    <div className="absolute bottom-3 left-4 z-20">
+                      <span className="text-[10px] font-bold bg-[#ddfd53] text-[#0b0c0f] px-2 py-0.5 rounded-full uppercase tracking-wider">
+                        Shared Banner
+                      </span>
+                      <h4 className="text-xs font-bold text-white mt-1">Convo secure workspace space initialized</h4>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Date separator divider */}
+                <div className="flex items-center justify-center my-6">
+                  <div className="h-px bg-[#24262d] flex-1" />
+                  <span className="px-3 py-1 rounded-full bg-[#18191e] border border-[#24262d] text-[9px] font-bold text-[#989ba2] uppercase tracking-wider">
+                    Timeline
+                  </span>
+                  <div className="h-px bg-[#24262d] flex-1" />
+                </div>
+
+                {activeMessages.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-10 text-center">
+                    <p className="text-xs text-[#5c5e66]">No messages yet. Type in the input below to begin chat.</p>
+                  </div>
+                ) : (
+                  activeMessages.map((msg) => {
+                    const isMe = msg.senderId === user.id;
+                    const isPending = msg.isPending;
+                    const isFailed = msg.isFailed;
+                    const initials = isMe ? getInitials(user.email) : getInitials(activeConversation.otherUser?.email || 'User');
+
+                    return (
+                      /* Dribbble Slack/Discord style inline layout */
+                      <div key={msg.id} className="flex items-start gap-3.5 group">
+                        {/* User Avatar */}
+                        <div className={`h-8 w-8 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 border ${
+                          isMe ? 'bg-[#ddfd53] text-[#0b0c0f] border-[#ddfd53]/10' : 'bg-[#18191e] text-slate-300 border-[#24262d]'
+                        }`}>
+                          {initials}
+                        </div>
+
+                        {/* Message Content block */}
+                        <div className="flex-1 min-w-0">
+                          {/* Header details */}
+                          <div className="flex items-baseline gap-2">
+                            <span className="text-xs font-bold text-white hover:underline cursor-pointer">
+                              {isMe ? user.email.split('@')[0] : activeConversation.otherUser?.email.split('@')[0]}
+                            </span>
+                            <span className="text-[9px] text-[#5c5e66]">
+                              {new Date(msg.createdAt).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </span>
+                            
+                            {/* Monotonic sequence tag */}
+                            <span className="text-[9px] font-mono text-[#ddfd53]/60 bg-[#ddfd53]/5 px-1.5 py-0.5 rounded border border-[#ddfd53]/10">
+                              #{msg.sequenceId > 0 && msg.sequenceId < 1e11 ? msg.sequenceId : 'pending'}
+                            </span>
+                          </div>
+
+                          {/* Content text */}
+                          <div className={`text-xs text-[#f1f5f9] mt-1 break-words leading-relaxed whitespace-pre-wrap ${
+                            isPending ? 'opacity-50 italic' : ''
+                          } ${isFailed ? 'text-red-400' : ''}`}>
+                            {msg.content}
+                          </div>
+                        </div>
+
+                        {/* Status Check Indicators (sent -> delivered -> read double ticks) */}
+                        {isMe && (
+                          <div className="self-center shrink-0 ml-2">
+                            {isPending ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin text-[#ddfd53]" />
+                            ) : isFailed ? (
+                              <AlertCircle className="h-3.5 w-3.5 text-red-500" />
+                            ) : msg.status === 'read' ? (
+                              <div className="flex items-center" title="Read">
+                                <CheckCheck className="h-4 w-4 text-[#ddfd53]" />
+                              </div>
+                            ) : msg.status === 'delivered' ? (
+                              <div className="flex items-center" title="Delivered">
+                                <CheckCheck className="h-4 w-4 text-[#989ba2]" />
+                              </div>
+                            ) : (
+                              <div className="flex items-center" title="Sent">
+                                <Check className="h-4 w-4 text-[#989ba2]" />
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Input Message panel */}
+              <div className="p-4 border-t border-[#24262d] bg-[#131419]/35 shrink-0">
+                <form onSubmit={handleSend} className="max-w-4xl mx-auto flex items-center gap-3 rounded-2xl bg-[#18191e] border border-[#24262d] px-4 py-2">
+                  <button type="button" className="text-[#989ba2] hover:text-white p-1.5 rounded-lg transition-colors cursor-pointer">
+                    <Paperclip className="h-4.5 w-4.5" />
+                  </button>
+                  <input
+                    type="text"
+                    value={inputMessage}
+                    onChange={(e) => setInputMessage(e.target.value)}
+                    placeholder={`Write a message to ${activeConversation.otherUser?.email.split('@')[0]}...`}
+                    className="flex-1 bg-transparent border-none py-2 text-xs text-white placeholder-[#5c5e66] focus:outline-none custom-input"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!inputMessage.trim()}
+                    className="h-9 w-9 rounded-xl bg-[#ddfd53] hover:bg-[#cbe64c] disabled:opacity-30 disabled:hover:bg-[#ddfd53] text-[#0b0c0f] flex items-center justify-center transition-all cursor-pointer shrink-0"
+                  >
+                    <Send className="h-4 w-4" />
+                  </button>
+                </form>
+              </div>
+            </>
+          ) : (
+            /* Empty Active Chat Panel */
+            <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+              <div className="h-14 w-14 rounded-2xl bg-[#18191e] border border-[#24262d] flex items-center justify-center mb-4">
+                <MessageSquare className="h-6 w-6 text-[#ddfd53]" />
+              </div>
+              <h2 className="text-sm font-bold text-white m-0">No active thread</h2>
+              <p className="text-xs text-[#989ba2] max-w-xs mt-1.5 leading-relaxed">
+                Select a conversation in the directory list, or click the **`+`** icon to search and initiate a discussion.
+              </p>
+            </div>
+          )}
+        </main>
+
+        {/* COLUMN 4: Right Context details sidebar (~280px, toggled) */}
+        {activeConversation && showRightSidebar && (
+          <aside className="w-[280px] dribbble-panel rounded-2xl flex flex-col overflow-hidden shadow-lg shrink-0 bg-[#131419]">
+            {/* Quick actions bar */}
+            <div className="p-4 border-b border-[#24262d] flex items-center justify-around bg-[#18191e]/20">
+              <button className="h-8 w-8 rounded-full bg-[#ddfd53]/10 border border-[#ddfd53]/25 flex items-center justify-center text-[#ddfd53] hover:bg-[#ddfd53]/20 transition-all cursor-pointer">
+                <Phone className="h-3.5 w-3.5" />
+              </button>
+              <button className="h-8 w-8 rounded-full bg-[#18191e] border border-[#24262d] flex items-center justify-center text-slate-300 hover:text-white transition-all cursor-pointer">
+                <Video className="h-3.5 w-3.5" />
+              </button>
+              <button className="h-8 w-8 rounded-full bg-[#18191e] border border-[#24262d] flex items-center justify-center text-slate-300 hover:text-white transition-all cursor-pointer">
+                <Pin className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {/* Members list */}
+            <div className="p-4 border-b border-[#24262d]">
+              <h3 className="text-xs font-bold text-white mb-3">Members</h3>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="h-7 w-7 rounded-full bg-[#18191e] border border-[#24262d] flex items-center justify-center font-bold text-[10px] text-white shrink-0">
+                      {getInitials(activeConversation.otherUser?.email)}
+                    </div>
+                    <span className="text-xs font-semibold text-slate-300 truncate">
+                      {activeConversation.otherUser?.email.split('@')[0]}
+                    </span>
+                  </div>
+                  <span className="text-[9px] font-bold text-[#5c5e66] uppercase">Member</span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="h-7 w-7 rounded-full bg-[#ddfd53] text-[#0b0c0f] flex items-center justify-center font-bold text-[10px] shrink-0">
+                      {getInitials(user.email)}
+                    </div>
+                    <span className="text-xs font-semibold text-slate-300 truncate">
+                      {user.email.split('@')[0]} (You)
+                    </span>
+                  </div>
+                  <span className="text-[9px] font-bold text-[#ddfd53] uppercase">Admin</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Files Accordion */}
+            <div className="border-b border-[#24262d]">
+              <button
+                onClick={() => setFilesOpen(!filesOpen)}
+                className="w-full flex items-center justify-between p-4 text-xs font-bold text-white hover:bg-[#18191e]/40 transition-colors cursor-pointer"
+              >
+                <span>Files</span>
+                {filesOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </button>
+              
+              {filesOpen && (
+                <div className="px-4 pb-4 space-y-2">
+                  <div className="flex items-center gap-2.5 rounded-lg bg-[#18191e]/40 p-2 border border-[#24262d]/50 text-left">
+                    <div className="h-7 w-7 rounded bg-[#24262d] flex items-center justify-center shrink-0">
+                      <FileText className="h-4 w-4 text-indigo-400" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-semibold text-slate-300 truncate">project_spec.pdf</p>
+                      <p className="text-[9px] text-[#5c5e66]">1.2 MB • PDF Document</p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-2.5 rounded-lg bg-[#18191e]/40 p-2 border border-[#24262d]/50 text-left">
+                    <div className="h-7 w-7 rounded bg-[#24262d] flex items-center justify-center shrink-0">
+                      <Image className="h-4 w-4 text-emerald-400" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-semibold text-slate-300 truncate">design_reference.png</p>
+                      <p className="text-[9px] text-[#5c5e66]">3.4 MB • PNG Image</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Links Accordion */}
+            <div className="border-b border-[#24262d]">
+              <button
+                onClick={() => setLinksOpen(!linksOpen)}
+                className="w-full flex items-center justify-between p-4 text-xs font-bold text-white hover:bg-[#18191e]/40 transition-colors cursor-pointer"
+              >
+                <span>Shared links</span>
+                {linksOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </button>
+
+              {linksOpen && (
+                <div className="px-4 pb-4 space-y-2">
+                  <div className="flex items-center gap-2 rounded-lg bg-[#18191e]/40 p-2 border border-[#24262d]/50 text-left">
+                    <Link2 className="h-3.5 w-3.5 text-[#ddfd53] shrink-0" />
+                    <a
+                      href="https://dribbble.com"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[10px] text-slate-300 truncate hover:underline"
+                    >
+                      https://dribbble.com/shots/24911746
+                    </a>
+                  </div>
+                </div>
+              )}
+            </div>
+          </aside>
+        )}
+      </div>
 
       {/* User Search Dialog overlay */}
       {showUserSearch && (

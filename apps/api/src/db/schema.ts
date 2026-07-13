@@ -44,3 +44,16 @@ export const messages = pgTable('messages', {
     uniqueSeq: unique('unique_conversation_seq').on(table.conversationId, table.sequenceId),
   };
 });
+
+// Added for per-recipient delivery and read state tracking
+export const messageStatuses = pgTable('message_statuses', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  messageId: uuid('message_id').references(() => messages.id, { onDelete: 'cascade' }).notNull(),
+  recipientId: uuid('recipient_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  status: text('status').notNull(), // 'sent' | 'delivered' | 'read'
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => {
+  return {
+    uniqueMsgRecipient: unique('unique_message_recipient').on(table.messageId, table.recipientId),
+  };
+});

@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
-import { eq, and, ne, inArray } from 'drizzle-orm';
-import { db, users, conversations, conversationMembers, messages } from '../db';
+import { eq, and, ne, inArray, sql } from 'drizzle-orm';
+import { db, users, conversations, conversationMembers, messages, messageStatuses } from '../db';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth';
 
 const router = Router();
@@ -181,8 +181,10 @@ router.get('/conversations/:id/messages', async (req: AuthenticatedRequest, res:
         content: messages.content,
         sequenceId: messages.sequenceId,
         createdAt: messages.createdAt,
+        status: sql<'sent' | 'delivered' | 'read'>`COALESCE(${messageStatuses.status}, 'sent')`,
       })
       .from(messages)
+      .leftJoin(messageStatuses, eq(messages.id, messageStatuses.messageId))
       .where(eq(messages.conversationId, conversationId))
       .orderBy(messages.sequenceId);
 

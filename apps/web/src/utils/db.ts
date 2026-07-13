@@ -1,0 +1,186 @@
+import type { Message, Conversation } from '@convo/shared';
+
+const DB_NAME = 'convo_db';
+const DB_VERSION = 1;
+
+class LocalDbManager {
+  private db: IDBDatabase | null = null;
+
+  // Initialize DB and create object stores
+  init(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (this.db) return resolve();
+
+      const request = window.indexedDB.open(DB_NAME, DB_VERSION);
+
+      request.onerror = () => {
+        console.error('IndexedDB open error:', request.error);
+        reject(request.error);
+      };
+
+      request.onsuccess = () => {
+        this.db = request.result;
+        resolve();
+      };
+
+      request.onupgradeneeded = () => {
+        const database = request.result;
+        
+        if (!database.objectStoreNames.contains('conversations')) {
+          database.createObjectStore('conversations', { keyPath: 'id' });
+        }
+        
+        if (!database.objectStoreNames.contains('messages')) {
+          const messageStore = database.createObjectStore('messages', { keyPath: 'id' });
+          // Indexes for quick lookup and sorting
+          messageStore.createIndex('conversationId', 'conversationId', { unique: false });
+          messageStore.createIndex('sequenceId', 'sequenceId', { unique: false });
+        }
+      };
+    });
+  }
+
+  private getStore(storeName: 'conversations' | 'messages', mode: IDBTransactionMode): IDBObjectStore {
+    if (!this.db) throw new Error('Database not initialized');
+    const transaction = this.db.transaction(storeName, mode);
+    return transaction.objectStore(storeName);
+  }
+
+  // CONVERSATIONS
+  saveConversation(conv: Conversation): Promise<void> {
+    return new Promise((resolve, reject) => {
+      try {
+        const store = this.getStore('conversations', 'readwrite');
+        const request = store.put(conv);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  saveConversations(convs: Conversation[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (convs.length === 0) return resolve();
+      try {
+        if (!this.db) throw new Error('Database not initialized');
+        const transaction = this.db.transaction('conversations', 'readwrite');
+        const store = transaction.objectStore('conversations');
+
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+
+        for (const conv of convs) {
+          store.put(conv);
+        }
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  getConversations(): Promise<Conversation[]> {
+    return new Promise((resolve, reject) => {
+      try {
+        const store = this.getStore('conversations', 'readonly');
+        const request = store.getAll();
+        request.onsuccess = () => resolve(request.result || []);
+        request.onerror = () => reject(request.error);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  // MESSAGES
+  saveMessage(msg: Message): Promise<void> {
+    return new Promise((resolve, reject) => {
+      try {
+        const store = this.getStore('messages', 'readwrite');
+        const request = store.put(msg);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  saveMessages(msgs: Message[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (msgs.length === 0) return resolve();
+      try {
+        if (!this.db) throw new Error('Database not initialized');
+        const transaction = this.db.transaction('messages', 'readwrite');
+        const store = transaction.objectStore('messages');
+
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+
+        for (const msg of msgs) {
+          store.put(msg);
+        }
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  getMessagesForConversation(conversationId: string): Promise<Message[]> {
+    return new Promise((resolve, reject) => {
+      try {
+        if (!this.db) throw new Error('Database not initialized');
+        const transaction = this.db.transaction('messages', 'readonly');
+        const store = transaction.objectStore('messages');
+        const index = store.index('conversationId');
+        
+        const request = index.getAll(IDBKeyRange.only(conversationId));
+        request.onsuccess = () => {
+          const list = request.result || [];
+          // Sort locally by sequenceId asc
+          list.sort((a, b) => a.sequenceId - b.sequenceId);
+          resolve(list);
+        };
+        request.onerror = () => reject(request.error);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  getUnsentMessages(): Promise<Message[]> {
+    return new Promise((resolve, reject) => {
+      try {
+        const store = this.getStore('messages', 'readonly');
+        const request = store.getAll();
+        request.onsuccess = () => {
+          const list: Message[] = request.result || [];
+          // Unsent messages are marked as pending or have negative/mock sequence numbers
+          const unsent = list.filter((m) => m.isPending || m.status === 'sent' && m.sequenceId > 1e11);
+          resolve(unsent);
+        };
+        request.onerror = () => reject(request.error);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  clearAll(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      try {
+        if (!this.db) throw new Error('Database not initialized');
+        const transaction = this.db.transaction(['conversations', 'messages'], 'readwrite');
+        transaction.objectStore('conversations').clear();
+        transaction.objectStore('messages').clear();
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+}
+
+export const localDb = new LocalDbManager();
