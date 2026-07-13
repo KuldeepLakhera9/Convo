@@ -292,6 +292,9 @@ export function initWebSocketServer(server: Server) {
                 createdAt: messages.createdAt,
                 updatedAt: messages.updatedAt,
                 encryptedPayloads: messages.encryptedPayloads,
+                deletedAt: messages.deletedAt,
+                replyToId: messages.replyToId,
+                isEdited: messages.isEdited,
                 status: sql<'sent' | 'delivered' | 'read'>`COALESCE(${messageStatuses.status}, 'sent')`,
               })
               .from(messages)
