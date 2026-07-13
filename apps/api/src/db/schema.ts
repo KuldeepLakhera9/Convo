@@ -42,13 +42,18 @@ export const messages = pgTable('messages', {
   updatedAt: timestamp('updated_at', { withTimezone: true }),
   // E2EE encrypted payloads per device ID: { deviceId -> { ciphertext, iv, ephemeralPublicKey } }
   encryptedPayloads: jsonb('encrypted_payloads'),
+  // Soft delete — null means active
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  // Threaded replies
+  replyToId: uuid('reply_to_id'),
+  // Edit tracking
+  isEdited: boolean('is_edited').default(false).notNull(),
 }, (table) => {
   return {
     uniqueSeq: unique('unique_conversation_seq').on(table.conversationId, table.sequenceId),
   };
 });
 
-// Added for per-recipient delivery and read state tracking
 export const messageStatuses = pgTable('message_statuses', {
   id: uuid('id').defaultRandom().primaryKey(),
   messageId: uuid('message_id').references(() => messages.id, { onDelete: 'cascade' }).notNull(),
@@ -61,16 +66,28 @@ export const messageStatuses = pgTable('message_statuses', {
   };
 });
 
-// E2EE public prekey bundles registered per device/session of a user
 export const devicePrekeys = pgTable('device_prekeys', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   deviceId: text('device_id').notNull(),
-  identityKey: text('identity_key').notNull(), // SPKI base64 format public identity key
-  signedPrekey: text('signed_prekey').notNull(), // SPKI base64 format public signed prekey
+  identityKey: text('identity_key').notNull(),
+  signedPrekey: text('signed_prekey').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => {
   return {
     uniqueUserDevice: unique('unique_user_device').on(table.userId, table.deviceId),
+  };
+});
+
+// Emoji reactions on messages — one row per (message, user, emoji)
+export const messageReactions = pgTable('message_reactions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  messageId: uuid('message_id').references(() => messages.id, { onDelete: 'cascade' }).notNull(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  emoji: text('emoji').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => {
+  return {
+    uniqueReaction: unique('unique_message_reaction').on(table.messageId, table.userId, table.emoji),
   };
 });

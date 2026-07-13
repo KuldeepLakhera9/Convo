@@ -4,7 +4,7 @@ import url from 'url';
 import { randomUUID } from 'crypto';
 import { sql, eq, and, ne, inArray, gt } from 'drizzle-orm';
 import { verifyAccessToken } from '../utils/auth';
-import { db, messages, conversationMembers, messageStatuses } from '../db';
+import { db, messages, conversationMembers, messageStatuses, messageReactions } from '../db';
 import { redisPublisher, redisSubscriber } from '../utils/redis';
 import { WsMessage, Message } from '@convo/shared';
 
@@ -118,7 +118,7 @@ export function initWebSocketServer(server: Server) {
         
         // 1. SEND MESSAGE
         if (parsedData.type === 'send_message') {
-          const { id: messageId, conversationId, content, encryptedPayloads } = parsedData.payload;
+          const { id: messageId, conversationId, content, encryptedPayloads, replyToId } = parsedData.payload;
 
           if (!messageId || !conversationId || !content.trim()) {
             sendToSocket(ws, {
@@ -218,6 +218,7 @@ export function initWebSocketServer(server: Server) {
                   content,
                   sequenceId: nextSequenceId,
                   encryptedPayloads,
+                  replyToId: replyToId || null,
                 })
                 .returning();
 
@@ -236,6 +237,8 @@ export function initWebSocketServer(server: Server) {
                 createdAt: insertedMsg.createdAt.toISOString(),
                 status: initialStatus,
                 encryptedPayloads: insertedMsg.encryptedPayloads as any,
+                replyToId: insertedMsg.replyToId ?? undefined,
+                isEdited: insertedMsg.isEdited,
               };
             });
           } catch (txError: any) {
@@ -348,6 +351,9 @@ export function initWebSocketServer(server: Server) {
               updatedAt: m.updatedAt?.toISOString(),
               status: m.status,
               encryptedPayloads: m.encryptedPayloads as any,
+              deletedAt: m.deletedAt?.toISOString(),
+              replyToId: m.replyToId ?? undefined,
+              isEdited: m.isEdited,
             }));
 
             allMissedMessages.push(...mappedList);
@@ -490,7 +496,151 @@ export function initWebSocketServer(server: Server) {
           }
         }
 
-        // 5. WebRTC VIDEO CALLING SIGNALS
+        // 5. TYPING INDICATORS
+        else if (parsedData.type === 'typing_start') {
+          const { conversationId } = parsedData.payload;
+          // Store a TTL key in Redis so indicator auto-clears if user disconnects
+          await redisPublisher.setex(`typing:${conversationId}:${userId}`, 6, '1');
+
+          const otherMember = await db.query.conversationMembers.findFirst({
+            where: and(
+              eq(conversationMembers.conversationId, conversationId),
+              ne(conversationMembers.userId, userId)
+            ),
+          });
+          if (otherMember) {
+            await publishToUser(otherMember.userId, {
+              type: 'user_typing',
+              payload: { conversationId, userId, isTyping: true },
+            });
+          }
+        }
+
+        else if (parsedData.type === 'typing_stop') {
+          const { conversationId } = parsedData.payload;
+          await redisPublisher.del(`typing:${conversationId}:${userId}`);
+
+          const otherMember = await db.query.conversationMembers.findFirst({
+            where: and(
+              eq(conversationMembers.conversationId, conversationId),
+              ne(conversationMembers.userId, userId)
+            ),
+          });
+          if (otherMember) {
+            await publishToUser(otherMember.userId, {
+              type: 'user_typing',
+              payload: { conversationId, userId, isTyping: false },
+            });
+          }
+        }
+
+        // 6. SOFT DELETE
+        else if (parsedData.type === 'delete_message') {
+          const { messageId, conversationId } = parsedData.payload;
+
+          // Only the sender can delete their own message
+          const msgRecord = await db.query.messages.findFirst({
+            where: and(
+              eq(messages.id, messageId),
+              eq(messages.senderId, userId)
+            ),
+          });
+          if (!msgRecord) return;
+
+          const deletedAtTime = new Date();
+          await db.update(messages)
+            .set({ deletedAt: deletedAtTime })
+            .where(eq(messages.id, messageId));
+
+          const otherMember = await db.query.conversationMembers.findFirst({
+            where: and(
+              eq(conversationMembers.conversationId, conversationId),
+              ne(conversationMembers.userId, userId)
+            ),
+          });
+          if (!otherMember) return;
+
+          for (const memberId of [userId, otherMember.userId]) {
+            await publishToUser(memberId, {
+              type: 'message_deleted',
+              payload: { messageId, conversationId, deletedAt: deletedAtTime.toISOString() },
+            });
+          }
+        }
+
+        // 7. REACTIONS
+        else if (parsedData.type === 'reaction_add') {
+          const { messageId, conversationId, emoji } = parsedData.payload;
+
+          // Upsert — ignore duplicates
+          await db.insert(messageReactions)
+            .values({ messageId, userId, emoji })
+            .onConflictDoNothing();
+
+          // Rebuild full reactions map for this message
+          const rows = await db.query.messageReactions.findMany({
+            where: eq(messageReactions.messageId, messageId),
+          });
+          const reactionMap: Record<string, string[]> = {};
+          for (const r of rows) {
+            if (!reactionMap[r.emoji]) reactionMap[r.emoji] = [];
+            reactionMap[r.emoji].push(r.userId);
+          }
+
+          const otherMember = await db.query.conversationMembers.findFirst({
+            where: and(
+              eq(conversationMembers.conversationId, conversationId),
+              ne(conversationMembers.userId, userId)
+            ),
+          });
+          if (!otherMember) return;
+
+          for (const memberId of [userId, otherMember.userId]) {
+            await publishToUser(memberId, {
+              type: 'reaction_update',
+              payload: { messageId, conversationId, reactions: reactionMap },
+            });
+          }
+        }
+
+        else if (parsedData.type === 'reaction_remove') {
+          const { messageId, conversationId, emoji } = parsedData.payload;
+
+          await db.delete(messageReactions)
+            .where(
+              and(
+                eq(messageReactions.messageId, messageId),
+                eq(messageReactions.userId, userId),
+                eq(messageReactions.emoji, emoji)
+              )
+            );
+
+          const rows = await db.query.messageReactions.findMany({
+            where: eq(messageReactions.messageId, messageId),
+          });
+          const reactionMap: Record<string, string[]> = {};
+          for (const r of rows) {
+            if (!reactionMap[r.emoji]) reactionMap[r.emoji] = [];
+            reactionMap[r.emoji].push(r.userId);
+          }
+
+          const otherMember = await db.query.conversationMembers.findFirst({
+            where: and(
+              eq(conversationMembers.conversationId, conversationId),
+              ne(conversationMembers.userId, userId)
+            ),
+          });
+          if (!otherMember) return;
+
+          for (const memberId of [userId, otherMember.userId]) {
+            await publishToUser(memberId, {
+              type: 'reaction_update',
+              payload: { messageId, conversationId, reactions: reactionMap },
+            });
+          }
+        }
+
+        // 8. WebRTC VIDEO CALLING SIGNALS
         else if (parsedData.type === 'call_user') {
           const { conversationId, offer } = parsedData.payload;
           const otherMember = await db.query.conversationMembers.findFirst({

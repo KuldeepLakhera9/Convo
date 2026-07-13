@@ -8,7 +8,13 @@ export interface Conversation {
   id: string;
   createdAt: string;
   updatedAt: string;
-  otherUser?: User; // In 1:1, the other member
+  otherUser?: User;
+}
+
+export interface ReplyPreview {
+  id: string;
+  content: string;
+  senderId: string;
 }
 
 export interface Message {
@@ -18,12 +24,17 @@ export interface Message {
   content: string;
   sequenceId: number;
   createdAt: string;
-  updatedAt?: string; // Optional field indicating when the message was edited
-  status: 'sent' | 'delivered' | 'read'; // Added delivery state tracking
-  isPending?: boolean; // For client optimistic UI
-  isFailed?: boolean;   // For client error UI
-  // E2EE properties: mapping deviceId -> ciphertext payload
+  updatedAt?: string;
+  status: 'sent' | 'delivered' | 'read';
+  isPending?: boolean;
+  isFailed?: boolean;
   encryptedPayloads?: Record<string, any>;
+  // New fields
+  deletedAt?: string;
+  replyToId?: string;
+  replyTo?: ReplyPreview;        // denormalised preview, populated on client
+  isEdited?: boolean;
+  reactions?: Record<string, string[]>; // emoji -> userId[]
 }
 
 export interface AuthResponse {
@@ -33,15 +44,21 @@ export interface AuthResponse {
 
 export interface PrekeyRegistration {
   deviceId: string;
-  identityKey: string; // SPKI base64
-  signedPrekey: string; // SPKI base64
+  identityKey: string;
+  signedPrekey: string;
 }
 
 export interface PrekeyBundle {
   userId: string;
   deviceId: string;
-  identityKey: string; // SPKI base64
-  signedPrekey: string; // SPKI base64
+  identityKey: string;
+  signedPrekey: string;
+}
+
+export interface SearchResult {
+  message: Message;
+  conversationId: string;
+  otherUserEmail: string;
 }
 
 // WebSocket Event Payloads
@@ -49,17 +66,18 @@ export type WsMessage =
   | {
       type: 'send_message';
       payload: {
-        id: string; // client-generated UUID for deduplication
+        id: string;
         conversationId: string;
         content: string;
         encryptedPayloads?: Record<string, any>;
+        replyToId?: string;
       };
     }
   | {
       type: 'message_ack';
       payload: {
-        tempId: string; // client temp id / UUID
-        message: Message; // persisted DB message
+        tempId: string;
+        message: Message;
       };
     }
   | {
@@ -86,8 +104,8 @@ export type WsMessage =
       payload: {
         conversationId: string;
         status: 'delivered' | 'read';
-        messageId?: string;          // update a single message
-        upToSequenceId?: number;     // bulk update up to this sequence number
+        messageId?: string;
+        upToSequenceId?: number;
       };
     }
   | {
@@ -97,7 +115,7 @@ export type WsMessage =
         status: 'delivered' | 'read';
         messageId?: string;
         upToSequenceId?: number;
-        userId: string; // user whose status changed (the recipient of the message)
+        userId: string;
       };
     }
   | {
@@ -117,53 +135,71 @@ export type WsMessage =
         updatedAt: string;
       };
     }
-  // WebRTC Video Call Signaling Events
+  // ── Typing indicators ───────────────────────────────────────────────────────
+  | {
+      type: 'typing_start';
+      payload: { conversationId: string };
+    }
+  | {
+      type: 'typing_stop';
+      payload: { conversationId: string };
+    }
+  | {
+      type: 'user_typing';
+      payload: { conversationId: string; userId: string; isTyping: boolean };
+    }
+  // ── Soft delete ─────────────────────────────────────────────────────────────
+  | {
+      type: 'delete_message';
+      payload: { messageId: string; conversationId: string };
+    }
+  | {
+      type: 'message_deleted';
+      payload: { messageId: string; conversationId: string; deletedAt: string };
+    }
+  // ── Reactions ───────────────────────────────────────────────────────────────
+  | {
+      type: 'reaction_add';
+      payload: { messageId: string; conversationId: string; emoji: string };
+    }
+  | {
+      type: 'reaction_remove';
+      payload: { messageId: string; conversationId: string; emoji: string };
+    }
+  | {
+      type: 'reaction_update';
+      payload: {
+        messageId: string;
+        conversationId: string;
+        reactions: Record<string, string[]>; // emoji -> userId[]
+      };
+    }
+  // ── WebRTC ──────────────────────────────────────────────────────────────────
   | {
       type: 'call_user';
-      payload: {
-        conversationId: string;
-        offer: any; // SDP offer data
-      };
+      payload: { conversationId: string; offer: any };
     }
   | {
       type: 'call_incoming';
-      payload: {
-        conversationId: string;
-        offer: any;
-        fromUserId: string;
-      };
+      payload: { conversationId: string; offer: any; fromUserId: string };
     }
   | {
       type: 'call_accepted';
-      payload: {
-        conversationId: string;
-        answer: any; // SDP answer data
-      };
+      payload: { conversationId: string; answer: any };
     }
   | {
       type: 'call_rejected';
-      payload: {
-        conversationId: string;
-      };
+      payload: { conversationId: string };
     }
   | {
       type: 'call_hangup';
-      payload: {
-        conversationId: string;
-      };
+      payload: { conversationId: string };
     }
   | {
       type: 'ice_candidate';
-      payload: {
-        conversationId: string;
-        candidate: any;
-        toUserId: string;
-      };
+      payload: { conversationId: string; candidate: any; toUserId: string };
     }
   | {
       type: 'error';
-      payload: {
-        message: string;
-        tempId?: string;
-      };
+      payload: { message: string; tempId?: string };
     };
