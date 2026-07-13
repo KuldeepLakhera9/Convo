@@ -32,6 +32,17 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
     spk: { privateKey: CryptoKey; publicKey: CryptoKey };
   } | null>(null);
 
+  // WebRTC Video Calling state
+  const [callState, setCallState] = useState<'idle' | 'ringing_out' | 'ringing_in' | 'connected'>('idle');
+  const [activeCallConversationId, setActiveCallConversationId] = useState<string | null>(null);
+  const [callerId, setCallerId] = useState<string | null>(null);
+  const [callOffer, setCallOffer] = useState<any | null>(null);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [callQuality, setCallQuality] = useState<'good' | 'poor' | 'disconnected'>('disconnected');
+  const [isMicMuted, setIsMicMuted] = useState(false);
+  const [isCamMuted, setIsCamMuted] = useState(false);
+
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectAttempts = useRef(0);
@@ -39,6 +50,13 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
 
   const conversationsRef = useRef<Conversation[]>([]);
   const prekeyBundlesRef = useRef<PrekeyBundle[]>([]);
+
+  // WebRTC Connection References
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
+  const callTimeoutRef = useRef<number | null>(null);
+  const iceCandidatesQueueRef = useRef<any[]>([]);
 
   useEffect(() => {
     conversationsRef.current = conversations;
@@ -78,7 +96,6 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
       let session = await localDb.getRatchetSession(sessionId);
 
       if (!session) {
-        // Locate sender's public prekey bundle
         const bundle = prekeyBundlesRef.current.find(
           (b) => b.userId === msg.senderId && b.deviceId === senderDeviceId
         );
@@ -90,7 +107,6 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
           };
         }
 
-        // Bob performs DH calculations to derive Bob's Root Key
         const rootKey = await x3dhReceive(
           keys.ik,
           keys.spk,
@@ -108,12 +124,10 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
         await localDb.saveRatchetSession(session);
       }
 
-      // Advance receiving chain key
       const { nextChainKey, messageKey } = await kdfStep(session.receivingChainKey, 'receive');
       session.receivingChainKey = nextChainKey;
       await localDb.saveRatchetSession(session);
 
-      // Decrypt E2EE ciphertext
       const plaintext = await decryptSymmetric(payload.ciphertext, payload.iv, messageKey);
       return {
         ...msg,
@@ -135,7 +149,6 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
       try {
         await localDb.init();
 
-        // Load or generate E2EE keys
         let keysBundle = await localDb.getDeviceKeys();
         let devId = keysBundle?.deviceId || null;
         
@@ -155,11 +168,9 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
         setLocalDeviceId(devId);
         setDeviceKeys(keysBundle);
 
-        // Load conversations
         const cachedConvs = await localDb.getConversations();
         setConversations(cachedConvs);
 
-        // Load and decrypt local message logs
         const messagesMap: Record<string, Message[]> = {};
         for (const conv of cachedConvs) {
           const cachedMsgs = await localDb.getMessagesForConversation(conv.id);
@@ -206,7 +217,7 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
     registerPrekeys();
   }, [accessToken, localDeviceId, deviceKeys]);
 
-  // Fetch participant prekey bundles for E2EE key distribution
+  // Fetch participant prekey bundles
   const fetchPrekeyBundles = useCallback(async (convId: string, token: string) => {
     try {
       const res = await fetch(`/api/chat/conversations/${convId}/prekeys`, {
@@ -221,7 +232,7 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
     }
   }, []);
 
-  // Fetch conversations from REST and cache them
+  // Fetch conversations
   const fetchConversations = useCallback(async (token: string) => {
     try {
       const res = await fetch('/api/chat/conversations', {
@@ -237,7 +248,7 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
     }
   }, []);
 
-  // Fetch messages from REST, decrypt them, and cache them
+  // Fetch messages
   const fetchMessages = useCallback(async (conversationId: string, token: string) => {
     if (!localDeviceId || !deviceKeys) return;
     try {
@@ -263,7 +274,7 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
     }
   }, [localDeviceId, deviceKeys, decryptMessage]);
 
-  // Bulk update message status in local state and IndexedDB
+  // Update status in local state
   const updateLocalMessageStatus = useCallback(async (
     conversationId: string,
     status: 'delivered' | 'read',
@@ -299,7 +310,7 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
     });
   }, []);
 
-  // Send status update event to server
+  // Send status update event
   const sendStatusUpdate = useCallback((
     conversationId: string,
     status: 'delivered' | 'read',
@@ -314,7 +325,143 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
     }
   }, []);
 
-  // Connect WebSocket with Exponential Backoff
+  // WebRTC State teardown
+  const resetCallState = useCallback(() => {
+    if (callTimeoutRef.current) {
+      clearTimeout(callTimeoutRef.current);
+      callTimeoutRef.current = null;
+    }
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => track.stop());
+      localStreamRef.current = null;
+    }
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+    iceCandidatesQueueRef.current = [];
+    setCallState('idle');
+    setCallerId(null);
+    setActiveCallConversationId(null);
+    setCallOffer(null);
+    setLocalStream(null);
+    setRemoteStream(null);
+    setCallQuality('disconnected');
+    setIsMicMuted(false);
+    setIsCamMuted(false);
+  }, []);
+
+  // Reject Call callback
+  const rejectCall = useCallback(() => {
+    if (activeCallConversationId && socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'call_rejected',
+        payload: { conversationId: activeCallConversationId },
+      }));
+    }
+    resetCallState();
+  }, [activeCallConversationId, resetCallState]);
+
+  // Hangup Call callback
+  const hangupCall = useCallback(() => {
+    if (activeCallConversationId && socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'call_hangup',
+        payload: { conversationId: activeCallConversationId },
+      }));
+    }
+    resetCallState();
+  }, [activeCallConversationId, resetCallState]);
+
+  // Accept Call callback
+  const acceptCall = useCallback(async () => {
+    if (callState !== 'ringing_in' || !callOffer || !activeCallConversationId) return;
+
+    if (callTimeoutRef.current) {
+      clearTimeout(callTimeoutRef.current);
+      callTimeoutRef.current = null;
+    }
+
+    try {
+      // Get local stream
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localStreamRef.current = stream;
+      setLocalStream(stream);
+
+      // Create Peer Connection
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+        ],
+      });
+      peerConnectionRef.current = pc;
+
+      // Add local media tracks
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+      // Handle remote media track
+      pc.ontrack = (event) => {
+        if (event.streams && event.streams[0]) {
+          remoteStreamRef.current = event.streams[0];
+          setRemoteStream(event.streams[0]);
+        }
+      };
+
+      // Gather ICE Candidates
+      pc.onicecandidate = (event) => {
+        if (event.candidate && callerId && socketRef.current?.readyState === WebSocket.OPEN) {
+          socketRef.current.send(JSON.stringify({
+            type: 'ice_candidate',
+            payload: {
+              conversationId: activeCallConversationId,
+              candidate: event.candidate,
+              toUserId: callerId,
+            },
+          }));
+        }
+      };
+
+      // Monitor network quality
+      pc.oniceconnectionstatechange = () => {
+        const state = pc.iceConnectionState;
+        if (state === 'connected' || state === 'completed') {
+          setCallQuality('good');
+        } else if (state === 'disconnected') {
+          setCallQuality('poor');
+        } else if (state === 'failed' || state === 'closed') {
+          setCallQuality('disconnected');
+          resetCallState();
+        }
+      };
+
+      // Set remote SDP offer & create local SDP answer
+      await pc.setRemoteDescription(new RTCSessionDescription(callOffer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      // Send answer back to Caller
+      if (socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({
+          type: 'call_accepted',
+          payload: { conversationId: activeCallConversationId, answer },
+        }));
+      }
+
+      setCallState('connected');
+
+      // Flush queued ICE candidates
+      for (const cand of iceCandidatesQueueRef.current) {
+        await pc.addIceCandidate(new RTCIceCandidate(cand));
+      }
+      iceCandidatesQueueRef.current = [];
+    } catch (err) {
+      console.error('Failed to accept incoming WebRTC call:', err);
+      resetCallState();
+    }
+  }, [callState, callOffer, activeCallConversationId, callerId, resetCallState]);
+
+  // Connect WebSocket
   const connectWs = useCallback(async (tokenToUse: string) => {
     if (socketRef.current) {
       socketRef.current.close();
@@ -346,10 +493,8 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
           payload: { conversations: syncItems },
         }));
 
-        // Note: Replaying unsent messages is delayed until keys/sessions establish on network reconnect.
         const unsent = await localDb.getUnsentMessages();
         for (const m of unsent) {
-          // Re-send E2EE envelopes
           ws.send(JSON.stringify({
             type: 'send_message',
             payload: {
@@ -375,7 +520,6 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
         // 1. MESSAGE ACK
         if (wsMsg.type === 'message_ack') {
           const { tempId, message } = wsMsg.payload;
-          
           await localDb.saveMessage(message);
           const decrypted = await decryptMessage(message, localDeviceId, deviceKeys);
 
@@ -393,7 +537,6 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
         // 2. NEW MESSAGE
         else if (wsMsg.type === 'new_message') {
           const message = wsMsg.payload;
-          
           await localDb.saveMessage(message);
           const decrypted = await decryptMessage(message, localDeviceId, deviceKeys);
 
@@ -475,7 +618,6 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
         // 4. MESSAGE STATUS UPDATE
         else if (wsMsg.type === 'message_status_update') {
           const { conversationId, status, messageId, upToSequenceId, userId } = wsMsg.payload;
-          
           const otherUser = conversationsRef.current.find((c) => c.id === conversationId)?.otherUser;
           const targetSenderId = (userId === currentUserId) ? otherUser?.id : currentUserId;
           
@@ -487,8 +629,6 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
         // 5. MESSAGE EDITED
         else if (wsMsg.type === 'message_edited') {
           const { messageId, conversationId, content } = wsMsg.payload;
-          // Plaintext edit message received (relayed via sender E2EE updates or decrypted plaintext)
-          
           setMessages((prev) => {
             const list = prev[conversationId] || [];
             const updatedList = list.map((msg) =>
@@ -507,10 +647,69 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
           });
         }
         
-        // 6. ERROR
+        // 6. WebRTC: INCOMING CALL OFFER
+        else if (wsMsg.type === 'call_incoming') {
+          const { conversationId, offer, fromUserId } = wsMsg.payload;
+          setCallState('ringing_in');
+          setCallerId(fromUserId);
+          setActiveCallConversationId(conversationId);
+          setCallOffer(offer);
+
+          // Callee ringing timeout (30 seconds)
+          callTimeoutRef.current = window.setTimeout(() => {
+            console.log('No answer - auto rejecting incoming call.');
+            rejectCall();
+          }, 30000);
+        }
+
+        // 7. WebRTC: CALL ACCEPTED (SDP ANSWER)
+        else if (wsMsg.type === 'call_accepted') {
+          const { answer } = wsMsg.payload;
+          if (callTimeoutRef.current) {
+            clearTimeout(callTimeoutRef.current);
+            callTimeoutRef.current = null;
+          }
+          if (peerConnectionRef.current) {
+            await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+            setCallState('connected');
+
+            // Flush queued ICE candidates
+            for (const cand of iceCandidatesQueueRef.current) {
+              await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(cand));
+            }
+            iceCandidatesQueueRef.current = [];
+          }
+        }
+
+        // 8. WebRTC: CALL REJECTED
+        else if (wsMsg.type === 'call_rejected') {
+          setError('Call rejected by the recipient');
+          resetCallState();
+          setTimeout(() => setError(null), 4000);
+        }
+
+        // 9. WebRTC: CALL HANGUP / DISCONNECT
+        else if (wsMsg.type === 'call_hangup') {
+          resetCallState();
+        }
+
+        // 10. WebRTC: ICE CANDIDATE
+        else if (wsMsg.type === 'ice_candidate') {
+          const { candidate } = wsMsg.payload;
+          const pc = peerConnectionRef.current;
+          if (pc && pc.remoteDescription) {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          } else {
+            iceCandidatesQueueRef.current.push(candidate);
+          }
+        }
+        
+        // 11. ERROR
         else if (wsMsg.type === 'error') {
           const { message, tempId } = wsMsg.payload;
-          console.error('Server ws error:', message);
+          setError(message);
+          setTimeout(() => setError(null), 4000);
+
           if (tempId) {
             setMessages((prev) => {
               for (const convId of Object.keys(prev)) {
@@ -543,7 +742,6 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
 
       if (accessToken) {
         const backoffDelay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000) + Math.random() * 500;
-        
         reconnectAttempts.current += 1;
         
         reconnectTimeoutRef.current = window.setTimeout(async () => {
@@ -558,7 +756,7 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
     ws.onerror = (err) => {
       console.error('WebSocket connection error:', err);
     };
-  }, [accessToken, currentUserId, activeConversationId, sendStatusUpdate, updateLocalMessageStatus, decryptMessage, localDeviceId, deviceKeys]);
+  }, [accessToken, currentUserId, activeConversationId, sendStatusUpdate, updateLocalMessageStatus, decryptMessage, localDeviceId, deviceKeys, resetCallState, rejectCall]);
 
   // Initial connection hook
   useEffect(() => {
@@ -582,10 +780,16 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((t) => t.stop());
+      }
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.close();
+      }
     };
   }, [accessToken, connectWs, fetchConversations]);
 
-  // Fetch prekeys and decrypt unread messages when active conversation changes
+  // Fetch prekeys when active conversation changes
   useEffect(() => {
     if (activeConversationId && accessToken && localDeviceId && deviceKeys) {
       const initConversationSession = async () => {
@@ -604,6 +808,90 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
     }
   }, [activeConversationId, accessToken, fetchMessages, fetchPrekeyBundles, currentUserId, sendStatusUpdate, updateLocalMessageStatus, localDeviceId, deviceKeys]);
 
+  // Initiate Call callback (Caller)
+  const startCall = useCallback(async (conversationId: string) => {
+    if (callState !== 'idle' || !socketRef.current) return;
+
+    setActiveCallConversationId(conversationId);
+    setCallState('ringing_out');
+
+    try {
+      // Get local media
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localStreamRef.current = stream;
+      setLocalStream(stream);
+
+      // Create Peer Connection
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+        ],
+      });
+      peerConnectionRef.current = pc;
+
+      // Add local media tracks
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+      // Handle remote stream
+      pc.ontrack = (event) => {
+        if (event.streams && event.streams[0]) {
+          remoteStreamRef.current = event.streams[0];
+          setRemoteStream(event.streams[0]);
+        }
+      };
+
+      // Gather local ICE Candidates
+      pc.onicecandidate = (event) => {
+        const otherMember = conversationsRef.current.find((c) => c.id === conversationId)?.otherUser;
+        if (event.candidate && otherMember && socketRef.current?.readyState === WebSocket.OPEN) {
+          socketRef.current.send(JSON.stringify({
+            type: 'ice_candidate',
+            payload: {
+              conversationId,
+              candidate: event.candidate,
+              toUserId: otherMember.id,
+            },
+          }));
+        }
+      };
+
+      // Monitor network quality
+      pc.oniceconnectionstatechange = () => {
+        const state = pc.iceConnectionState;
+        if (state === 'connected' || state === 'completed') {
+          setCallQuality('good');
+        } else if (state === 'disconnected') {
+          setCallQuality('poor');
+        } else if (state === 'failed' || state === 'closed') {
+          setCallQuality('disconnected');
+          resetCallState();
+        }
+      };
+
+      // Create offer and set local description
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      // Send SDP Offer signaling event
+      if (socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({
+          type: 'call_user',
+          payload: { conversationId, offer },
+        }));
+      }
+
+      // Caller timeout (30 seconds)
+      callTimeoutRef.current = window.setTimeout(() => {
+        console.log('Ringing timeout - call cancelled.');
+        hangupCall();
+      }, 30000);
+    } catch (err) {
+      console.error('Failed to initiate WebRTC call:', err);
+      resetCallState();
+    }
+  }, [callState, resetCallState, hangupCall]);
+
   // Send E2EE Encrypted Message
   const sendMessage = useCallback(async (content: string) => {
     if (!activeConversationId || !currentUserId || !localDeviceId || !deviceKeys || !content.trim()) return;
@@ -614,18 +902,14 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
     } as any;
 
     try {
-      // Loop over all registered participant device key bundles
       for (const bundle of prekeyBundlesRef.current) {
-        // Skip current device
         if (bundle.userId === currentUserId && bundle.deviceId === localDeviceId) continue;
 
         const sessionId = `${bundle.userId}:${bundle.deviceId}`;
         let session = await localDb.getRatchetSession(sessionId);
-
         let sessionEphemeralPublicKey = session?.ephemeralPublicKey || '';
 
         if (!session) {
-          // Perform X3DH initiation handshake (generates ephemeral keys and initial root key)
           const { rootKey, ephemeralPublicKey } = await x3dhInitiate(
             deviceKeys.ik,
             bundle.identityKey,
@@ -644,12 +928,10 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
           await localDb.saveRatchetSession(session);
         }
 
-        // Advance sending KDF chain key
         const { nextChainKey, messageKey } = await kdfStep(session.sendingChainKey, 'send');
         session.sendingChainKey = nextChainKey;
         await localDb.saveRatchetSession(session);
 
-        // Encrypt message content for this specific recipient device using AES-GCM
         const { ciphertext, iv } = await encryptSymmetric(content.trim(), messageKey);
         encryptedPayloads[bundle.deviceId] = {
           ciphertext,
@@ -690,7 +972,7 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
         payload: {
           id: clientUuid,
           conversationId: activeConversationId,
-          content: '[Encrypted Message]', // Dummy plaintext sent to server
+          content: '[Encrypted Message]',
           encryptedPayloads,
         },
       }));
@@ -701,9 +983,6 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
   const editMessage = useCallback(async (messageId: string, content: string) => {
     if (!activeConversationId || !localDeviceId || !deviceKeys || !content.trim()) return;
 
-    // In a fully featured ratchet, edits are also encrypted per-device.
-    // For simplicity, we directly update locally and broadcast the edit over the active E2EE session channels.
-    // To prove stateless edits relay, we send the edit update.
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({
         type: 'edit_message',
@@ -715,6 +994,28 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
       }));
     }
   }, [activeConversationId, localDeviceId, deviceKeys]);
+
+  // Toggle Microphone
+  const toggleMic = useCallback(() => {
+    if (localStreamRef.current) {
+      const audioTrack = localStreamRef.current.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        setIsMicMuted(!audioTrack.enabled);
+      }
+    }
+  }, []);
+
+  // Toggle Camera
+  const toggleCam = useCallback(() => {
+    if (localStreamRef.current) {
+      const videoTrack = localStreamRef.current.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled;
+        setIsCamMuted(!videoTrack.enabled);
+      }
+    }
+  }, []);
 
   // Start Conversation
   const startConversation = useCallback(async (otherUserId: string) => {
@@ -755,5 +1056,20 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
     editMessage,
     startConversation,
     refreshConversations: () => accessToken && fetchConversations(accessToken),
+
+    // WebRTC Exports
+    callState,
+    activeCallConversationId,
+    callQuality,
+    localStream,
+    remoteStream,
+    isMicMuted,
+    isCamMuted,
+    startCall,
+    acceptCall,
+    rejectCall,
+    hangupCall,
+    toggleMic,
+    toggleCam,
   };
 }

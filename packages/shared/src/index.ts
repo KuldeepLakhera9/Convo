@@ -117,6 +117,49 @@ export type WsMessage =
         updatedAt: string;
       };
     }
+  // WebRTC Video Call Signaling Events
+  | {
+      type: 'call_user';
+      payload: {
+        conversationId: string;
+        offer: any; // SDP offer data
+      };
+    }
+  | {
+      type: 'call_incoming';
+      payload: {
+        conversationId: string;
+        offer: any;
+        fromUserId: string;
+      };
+    }
+  | {
+      type: 'call_accepted';
+      payload: {
+        conversationId: string;
+        answer: any; // SDP answer data
+      };
+    }
+  | {
+      type: 'call_rejected';
+      payload: {
+        conversationId: string;
+      };
+    }
+  | {
+      type: 'call_hangup';
+      payload: {
+        conversationId: string;
+      };
+    }
+  | {
+      type: 'ice_candidate';
+      payload: {
+        conversationId: string;
+        candidate: any;
+        toUserId: string;
+      };
+    }
   | {
       type: 'error';
       payload: {

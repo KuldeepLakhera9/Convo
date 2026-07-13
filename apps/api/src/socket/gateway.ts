@@ -489,6 +489,148 @@ export function initWebSocketServer(server: Server) {
             });
           }
         }
+
+        // 5. WebRTC VIDEO CALLING SIGNALS
+        else if (parsedData.type === 'call_user') {
+          const { conversationId, offer } = parsedData.payload;
+          const otherMember = await db.query.conversationMembers.findFirst({
+            where: and(
+              eq(conversationMembers.conversationId, conversationId),
+              ne(conversationMembers.userId, userId)
+            ),
+          });
+
+          if (!otherMember) {
+            sendToSocket(ws, {
+              type: 'error',
+              payload: { message: 'Conversation partner not found' },
+            });
+            return;
+          }
+
+          // Check if partner is online in Redis
+          const isOnline = await redisPublisher.exists(`presence:${otherMember.userId}`);
+          
+          if (isOnline === 0) {
+            // Callee is offline: register a Missed Call message
+            let persistedMsg: Message | null = null;
+            const messageId = randomUUID();
+            try {
+              await db.transaction(async (tx) => {
+                await tx.execute(sql`SELECT 1 FROM conversations WHERE id = ${conversationId} FOR UPDATE`);
+                const maxSeqQuery = await tx.execute(sql`SELECT COALESCE(MAX(sequence_id), 0) as max_seq FROM messages WHERE conversation_id = ${conversationId}`);
+                const nextSequenceId = Number(maxSeqQuery.rows[0]?.max_seq || 0) + 1;
+
+                const [insertedMsg] = await tx.insert(messages).values({
+                  id: messageId,
+                  conversationId,
+                  senderId: userId,
+                  content: '📞 Missed Call',
+                  sequenceId: nextSequenceId,
+                }).returning();
+
+                await tx.insert(messageStatuses).values({
+                  messageId: insertedMsg.id,
+                  recipientId: otherMember.userId,
+                  status: 'sent',
+                });
+
+                persistedMsg = {
+                  id: insertedMsg.id,
+                  conversationId: insertedMsg.conversationId,
+                  senderId: insertedMsg.senderId,
+                  content: insertedMsg.content,
+                  sequenceId: insertedMsg.sequenceId,
+                  createdAt: insertedMsg.createdAt.toISOString(),
+                  status: 'sent',
+                };
+              });
+            } catch (dbErr) {
+              console.error('Failed to save missed call message:', dbErr);
+            }
+
+            if (persistedMsg) {
+              // Notify caller with message_ack & error
+              sendToSocket(ws, {
+                type: 'new_message',
+                payload: persistedMsg,
+              });
+              
+              // Publish new missed call message to callee's Redis channel so it shows on reconnect
+              await publishToUser(otherMember.userId, {
+                type: 'new_message',
+                payload: persistedMsg,
+              });
+            }
+
+            sendToSocket(ws, {
+              type: 'error',
+              payload: { message: 'User is offline. Registered a missed call.' },
+            });
+          } else {
+            // Callee is online: forward the incoming call offer
+            await publishToUser(otherMember.userId, {
+              type: 'call_incoming',
+              payload: { conversationId, offer, fromUserId: userId },
+            });
+          }
+        }
+
+        else if (parsedData.type === 'call_accepted') {
+          const { conversationId, answer } = parsedData.payload;
+          const otherMember = await db.query.conversationMembers.findFirst({
+            where: and(
+              eq(conversationMembers.conversationId, conversationId),
+              ne(conversationMembers.userId, userId)
+            ),
+          });
+          if (otherMember) {
+            await publishToUser(otherMember.userId, {
+              type: 'call_accepted',
+              payload: { conversationId, answer },
+            });
+          }
+        }
+
+        else if (parsedData.type === 'call_rejected') {
+          const { conversationId } = parsedData.payload;
+          const otherMember = await db.query.conversationMembers.findFirst({
+            where: and(
+              eq(conversationMembers.conversationId, conversationId),
+              ne(conversationMembers.userId, userId)
+            ),
+          });
+          if (otherMember) {
+            await publishToUser(otherMember.userId, {
+              type: 'call_rejected',
+              payload: { conversationId },
+            });
+          }
+        }
+
+        else if (parsedData.type === 'call_hangup') {
+          const { conversationId } = parsedData.payload;
+          const otherMember = await db.query.conversationMembers.findFirst({
+            where: and(
+              eq(conversationMembers.conversationId, conversationId),
+              ne(conversationMembers.userId, userId)
+            ),
+          });
+          if (otherMember) {
+            await publishToUser(otherMember.userId, {
+              type: 'call_hangup',
+              payload: { conversationId },
+            });
+          }
+        }
+
+        else if (parsedData.type === 'ice_candidate') {
+          const { conversationId, candidate, toUserId } = parsedData.payload;
+          await publishToUser(toUserId, {
+            type: 'ice_candidate',
+            payload: { conversationId, candidate, toUserId },
+          });
+        }
       } catch (err: any) {
         console.error('Socket parsing error:', err);
       }
