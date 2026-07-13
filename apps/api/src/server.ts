@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import authRouter from './routes/auth';
 import chatRouter from './routes/chat';
+import prekeysRouter from './routes/prekeys';
 import { initWebSocketServer } from './socket/gateway';
 
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
@@ -25,6 +26,7 @@ app.use(cookieParser());
 // REST Routes
 app.use('/api/auth', authRouter);
 app.use('/api/chat', chatRouter);
+app.use('/api/chat', prekeysRouter);
 
 // Health Check
 app.get('/health', (req, res) => {

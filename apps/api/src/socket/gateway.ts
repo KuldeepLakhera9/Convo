@@ -1,18 +1,73 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { Server, IncomingMessage } from 'http';
 import url from 'url';
+import { randomUUID } from 'crypto';
 import { sql, eq, and, ne, inArray, gt } from 'drizzle-orm';
 import { verifyAccessToken } from '../utils/auth';
 import { db, messages, conversationMembers, messageStatuses } from '../db';
+import { redisPublisher, redisSubscriber } from '../utils/redis';
 import { WsMessage, Message } from '@convo/shared';
 
-// Tracks active connections: userId -> Set of WebSockets
-const userSockets = new Map<string, Set<WebSocket>>();
+// Type definitions for Redis Pub/Sub envelope wrapping
+interface RedisEnvelope {
+  wsMessage: WsMessage;
+  excludeSocketId?: string;
+}
+
+// Tracks local connections on THIS specific instance: userId -> Set of WebSockets
+const localUserSockets = new Map<string, Set<WebSocket>>();
+
+// Global handler for Redis Pub/Sub incoming messages
+redisSubscriber.on('message', (channel, messageStr) => {
+  if (channel.startsWith('user_channel:')) {
+    const targetUserId = channel.split(':')[1];
+    try {
+      const envelope: RedisEnvelope = JSON.parse(messageStr);
+      const sockets = localUserSockets.get(targetUserId);
+      if (sockets) {
+        for (const ws of sockets) {
+          // Prevent sending updates back to the specific tab/socket that initiated the action
+          if (envelope.excludeSocketId && (ws as any).socketId === envelope.excludeSocketId) {
+            continue;
+          }
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(envelope.wsMessage));
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to parse Redis Pub/Sub envelope:', err);
+    }
+  }
+});
+
+// Helper to publish a WebSocket message to a user channel via Redis
+async function publishToUser(targetUserId: string, wsMessage: WsMessage, excludeSocketId?: string) {
+  const envelope: RedisEnvelope = { wsMessage, excludeSocketId };
+  await redisPublisher.publish(`user_channel:${targetUserId}`, JSON.stringify(envelope));
+}
 
 export function initWebSocketServer(server: Server) {
   const wss = new WebSocketServer({ noServer: true });
 
-  // Handle upgrade and authenticate using JWT in query params
+  // Start Presence Heartbeat Timer
+  // Runs every 15 seconds to extend the TTL (to 30s) of all users currently connected to this instance
+  setInterval(async () => {
+    try {
+      const activeUsers = Array.from(localUserSockets.keys());
+      if (activeUsers.length === 0) return;
+
+      const pipeline = redisPublisher.pipeline();
+      for (const userId of activeUsers) {
+        pipeline.expire(`presence:${userId}`, 30);
+      }
+      await pipeline.exec();
+    } catch (err) {
+      console.error('Failed to run presence heartbeats:', err);
+    }
+  }, 15 * 1000);
+
+  // Upgrade HTTP connections and authenticate via token query params
   server.on('upgrade', (req: IncomingMessage, socket, head) => {
     try {
       const parsedUrl = url.parse(req.url || '', true);
@@ -36,14 +91,26 @@ export function initWebSocketServer(server: Server) {
     }
   });
 
-  wss.on('connection', (ws: WebSocket, req: IncomingMessage, userId: string) => {
-    console.log(`User connected: ${userId}`);
+  wss.on('connection', async (ws: WebSocket, req: IncomingMessage, userId: string) => {
+    const socketId = randomUUID();
+    (ws as any).socketId = socketId;
+    console.log(`User connected on local instance: ${userId} (socket ID: ${socketId})`);
 
-    // Store socket
-    if (!userSockets.has(userId)) {
-      userSockets.set(userId, new Set());
+    // Track local socket
+    if (!localUserSockets.has(userId)) {
+      localUserSockets.set(userId, new Set());
+      // First connection for this user on this instance: Subscribe to Redis channel
+      await redisSubscriber.subscribe(`user_channel:${userId}`);
     }
-    userSockets.get(userId)!.add(ws);
+    localUserSockets.get(userId)!.add(ws);
+
+    // Track distributed presence in Redis
+    try {
+      await redisPublisher.incr(`presence:${userId}`);
+      await redisPublisher.expire(`presence:${userId}`, 30);
+    } catch (presenceErr) {
+      console.error('Failed to track user connection in Redis:', presenceErr);
+    }
 
     ws.on('message', async (data: string) => {
       try {
@@ -51,7 +118,7 @@ export function initWebSocketServer(server: Server) {
         
         // 1. SEND MESSAGE
         if (parsedData.type === 'send_message') {
-          const { id: messageId, conversationId, content } = parsedData.payload;
+          const { id: messageId, conversationId, content, encryptedPayloads } = parsedData.payload;
 
           if (!messageId || !conversationId || !content.trim()) {
             sendToSocket(ws, {
@@ -61,7 +128,7 @@ export function initWebSocketServer(server: Server) {
             return;
           }
 
-          // DEDUPLICATION
+          // DEDUPLICATION Check
           const existingMsg = await db.query.messages.findFirst({
             where: eq(messages.id, messageId),
           });
@@ -86,13 +153,14 @@ export function initWebSocketServer(server: Server) {
                   createdAt: existingMsg.createdAt.toISOString(),
                   updatedAt: existingMsg.updatedAt?.toISOString(),
                   status: statusVal,
+                  encryptedPayloads: existingMsg.encryptedPayloads as any,
                 },
               },
             });
             return;
           }
 
-          // Verify membership
+          // Verify conversation membership
           const memberRecord = await db.query.conversationMembers.findFirst({
             where: and(
               eq(conversationMembers.conversationId, conversationId),
@@ -123,14 +191,15 @@ export function initWebSocketServer(server: Server) {
             return;
           }
 
-          const recipientSockets = userSockets.get(otherMember.userId);
-          const isRecipientOnline = recipientSockets && recipientSockets.size > 0;
+          // Check presence status in Redis (distributed presence checking)
+          const isRecipientOnline = (await redisPublisher.exists(`presence:${otherMember.userId}`)) === 1;
           const initialStatus: 'sent' | 'delivered' = isRecipientOnline ? 'delivered' : 'sent';
 
           let persistedMsg: Message | null = null;
           
           try {
             await db.transaction(async (tx) => {
+              // Lock the conversation row to secure sequential ordering
               await tx.execute(
                 sql`SELECT 1 FROM conversations WHERE id = ${conversationId} FOR UPDATE`
               );
@@ -148,6 +217,7 @@ export function initWebSocketServer(server: Server) {
                   senderId: userId,
                   content,
                   sequenceId: nextSequenceId,
+                  encryptedPayloads,
                 })
                 .returning();
 
@@ -165,6 +235,7 @@ export function initWebSocketServer(server: Server) {
                 sequenceId: insertedMsg.sequenceId,
                 createdAt: insertedMsg.createdAt.toISOString(),
                 status: initialStatus,
+                encryptedPayloads: insertedMsg.encryptedPayloads as any,
               };
             });
           } catch (txError: any) {
@@ -178,7 +249,7 @@ export function initWebSocketServer(server: Server) {
 
           if (!persistedMsg) return;
 
-          // ACK back to sender (active socket)
+          // ACK back to sender directly (on the active connection)
           sendToSocket(ws, {
             type: 'message_ack',
             payload: {
@@ -187,33 +258,20 @@ export function initWebSocketServer(server: Server) {
             },
           });
 
-          // Forward to recipient's active sessions
-          if (isRecipientOnline) {
-            for (const clientSocket of recipientSockets!) {
-              if (clientSocket.readyState === WebSocket.OPEN) {
-                sendToSocket(clientSocket, {
-                  type: 'new_message',
-                  payload: persistedMsg,
-                });
-              }
-            }
-          }
+          // Forward to recipient's active sessions (via Redis Pub/Sub)
+          await publishToUser(otherMember.userId, {
+            type: 'new_message',
+            payload: persistedMsg,
+          });
 
-          // Forward to sender's OTHER active sessions/tabs (multi-session sync)
-          const senderOtherSockets = userSockets.get(userId);
-          if (senderOtherSockets) {
-            for (const sSocket of senderOtherSockets) {
-              if (sSocket !== ws && sSocket.readyState === WebSocket.OPEN) {
-                sendToSocket(sSocket, {
-                  type: 'new_message',
-                  payload: persistedMsg,
-                });
-              }
-            }
-          }
+          // Forward to sender's other tabs/devices (via Redis Pub/Sub, skipping the current initiating socket ID)
+          await publishToUser(userId, {
+            type: 'new_message',
+            payload: persistedMsg,
+          }, socketId);
         }
         
-        // 2. SYNC REQUEST (Resumable Sync on reconnect)
+        // 2. SYNC REQUEST (Reconnection sync cursors)
         else if (parsedData.type === 'sync_request') {
           const { conversations: syncItems } = parsedData.payload;
           const allMissedMessages: Message[] = [];
@@ -230,6 +288,7 @@ export function initWebSocketServer(server: Server) {
                 sequenceId: messages.sequenceId,
                 createdAt: messages.createdAt,
                 updatedAt: messages.updatedAt,
+                encryptedPayloads: messages.encryptedPayloads,
                 status: sql<'sent' | 'delivered' | 'read'>`COALESCE(${messageStatuses.status}, 'sent')`,
               })
               .from(messages)
@@ -242,7 +301,7 @@ export function initWebSocketServer(server: Server) {
               )
               .orderBy(messages.sequenceId);
 
-            // Update status to 'delivered' for messages sent by others
+            // Update status to 'delivered' for missed messages sent by others
             const pendingDeliveredMsgIds = missedList
               .filter((m) => m.senderId !== userId && m.status === 'sent')
               .map((m) => m.id);
@@ -260,20 +319,16 @@ export function initWebSocketServer(server: Server) {
 
               const senderIds = Array.from(new Set(missedList.filter((m) => m.senderId !== userId).map((m) => m.senderId)));
               for (const senderId of senderIds) {
-                const senderSockets = userSockets.get(senderId);
-                if (senderSockets) {
-                  for (const sSocket of senderSockets) {
-                    sendToSocket(sSocket, {
-                      type: 'message_status_update',
-                      payload: {
-                        conversationId,
-                        status: 'delivered',
-                        userId,
-                        upToSequenceId: Math.max(...missedList.filter((m) => m.senderId === senderId).map((m) => m.sequenceId)),
-                      },
-                    });
-                  }
-                }
+                // Report delivery back to the sender (via Redis Pub/Sub)
+                await publishToUser(senderId, {
+                  type: 'message_status_update',
+                  payload: {
+                    conversationId,
+                    status: 'delivered',
+                    userId,
+                    upToSequenceId: Math.max(...missedList.filter((m) => m.senderId === senderId).map((m) => m.sequenceId)),
+                  },
+                });
               }
               
               for (const m of missedList) {
@@ -292,6 +347,7 @@ export function initWebSocketServer(server: Server) {
               createdAt: m.createdAt.toISOString(),
               updatedAt: m.updatedAt?.toISOString(),
               status: m.status,
+              encryptedPayloads: m.encryptedPayloads as any,
             }));
 
             allMissedMessages.push(...mappedList);
@@ -305,7 +361,7 @@ export function initWebSocketServer(server: Server) {
           });
         }
         
-        // 3. UPDATE STATUS (Delivery / Read state logs)
+        // 3. UPDATE STATUS (Delivery / Read event sync)
         else if (parsedData.type === 'update_status') {
           const { conversationId, status, messageId, upToSequenceId } = parsedData.payload;
 
@@ -319,7 +375,7 @@ export function initWebSocketServer(server: Server) {
           if (!otherMember) return;
 
           if (upToSequenceId) {
-            // Bulk update ensuring database one-way state transitions (never downgrade from read -> delivered)
+            // Update ensuring database status transitions only progress forward
             await db.execute(sql`
               UPDATE message_statuses
               SET status = ${status}, updated_at = NOW()
@@ -335,29 +391,22 @@ export function initWebSocketServer(server: Server) {
                 )
             `);
 
-            // MULTI-SESSION STATUS SYNC: Broadcast to both the partner and reader's own other active sessions
+            // Broadcast message_status_update via Redis Pub/Sub to reader's other tabs & conversation partner
             const targets = [userId, otherMember.userId];
             for (const targetId of targets) {
-              const sockets = userSockets.get(targetId);
-              if (sockets) {
-                for (const socket of sockets) {
-                  // Skip the specific socket tab that initiated this read update
-                  if (targetId === userId && socket === ws) continue;
-
-                  sendToSocket(socket, {
-                    type: 'message_status_update',
-                    payload: {
-                      conversationId,
-                      status,
-                      userId, // Reader ID
-                      upToSequenceId,
-                    },
-                  });
-                }
-              }
+              const excludeId = targetId === userId ? socketId : undefined;
+              await publishToUser(targetId, {
+                type: 'message_status_update',
+                payload: {
+                  conversationId,
+                  status,
+                  userId,
+                  upToSequenceId,
+                },
+              }, excludeId);
             }
           } else if (messageId) {
-            // Update single message status
+            // Update single message
             await db
               .update(messageStatuses)
               .set({ status, updatedAt: new Date() })
@@ -370,27 +419,21 @@ export function initWebSocketServer(server: Server) {
 
             const targets = [userId, otherMember.userId];
             for (const targetId of targets) {
-              const sockets = userSockets.get(targetId);
-              if (sockets) {
-                for (const socket of sockets) {
-                  if (targetId === userId && socket === ws) continue;
-
-                  sendToSocket(socket, {
-                    type: 'message_status_update',
-                    payload: {
-                      conversationId,
-                      status,
-                      userId,
-                      messageId,
-                    },
-                  });
-                }
-              }
+              const excludeId = targetId === userId ? socketId : undefined;
+              await publishToUser(targetId, {
+                type: 'message_status_update',
+                payload: {
+                  conversationId,
+                  status,
+                  userId,
+                  messageId,
+                },
+              }, excludeId);
             }
           }
         }
 
-        // 4. EDIT MESSAGE (Verify sender, update DB, broadcast message_edited)
+        // 4. EDIT MESSAGE (Distributed message editing)
         else if (parsedData.type === 'edit_message') {
           const { messageId, conversationId, content } = parsedData.payload;
 
@@ -398,7 +441,7 @@ export function initWebSocketServer(server: Server) {
             return;
           }
 
-          // Verify message sender is the current user
+          // Verify sender ownership
           const msgRecord = await db.query.messages.findFirst({
             where: and(
               eq(messages.id, messageId),
@@ -423,7 +466,6 @@ export function initWebSocketServer(server: Server) {
             })
             .where(eq(messages.id, messageId));
 
-          // Fetch recipient of the conversation
           const otherMember = await db.query.conversationMembers.findFirst({
             where: and(
               eq(conversationMembers.conversationId, conversationId),
@@ -433,45 +475,50 @@ export function initWebSocketServer(server: Server) {
 
           if (!otherMember) return;
 
-          // Broadcast message_edited to both members (all active sessions/tabs)
+          // Publish message_edited broadcast to both members' sub-channels
           const membersToNotify = [userId, otherMember.userId];
           for (const memberId of membersToNotify) {
-            const sockets = userSockets.get(memberId);
-            if (sockets) {
-              for (const socket of sockets) {
-                if (socket.readyState === WebSocket.OPEN) {
-                  sendToSocket(socket, {
-                    type: 'message_edited',
-                    payload: {
-                      messageId,
-                      conversationId,
-                      content: content.trim(),
-                      updatedAt: updatedAtTime.toISOString(),
-                    },
-                  });
-                }
-              }
-            }
+            await publishToUser(memberId, {
+              type: 'message_edited',
+              payload: {
+                messageId,
+                conversationId,
+                content: content.trim(),
+                updatedAt: updatedAtTime.toISOString(),
+              },
+            });
           }
         }
       } catch (err: any) {
-        console.error('Socket message parsing error:', err);
+        console.error('Socket parsing error:', err);
       }
     });
 
-    ws.onclose = () => {
-      console.log(`User disconnected: ${userId}`);
-      const sockets = userSockets.get(userId);
+    ws.onclose = async () => {
+      console.log(`User disconnected locally: ${userId} (socket ID: ${socketId})`);
+      const sockets = localUserSockets.get(userId);
       if (sockets) {
         sockets.delete(ws);
         if (sockets.size === 0) {
-          userSockets.delete(userId);
+          localUserSockets.delete(userId);
+          // Last active socket for this user on this instance closed: unsubscribe from Redis channel
+          await redisSubscriber.unsubscribe(`user_channel:${userId}`);
         }
+      }
+
+      // Decrement distributed presence count
+      try {
+        const remaining = await redisPublisher.decr(`presence:${userId}`);
+        if (remaining <= 0) {
+          await redisPublisher.del(`presence:${userId}`);
+        }
+      } catch (presenceCloseErr) {
+        console.error('Failed to clean presence in Redis on close:', presenceCloseErr);
       }
     };
 
     ws.onerror = (err) => {
-      console.error(`Socket error for user ${userId}:`, err);
+      console.error(`Socket error for ${userId}:`, err);
     };
   });
 }

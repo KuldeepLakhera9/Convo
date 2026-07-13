@@ -1,7 +1,7 @@
 import type { Message, Conversation } from '@convo/shared';
 
 const DB_NAME = 'convo_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // Incremented database schema version for E2EE keystores
 
 class LocalDbManager {
   private db: IDBDatabase | null = null;
@@ -32,15 +32,27 @@ class LocalDbManager {
         
         if (!database.objectStoreNames.contains('messages')) {
           const messageStore = database.createObjectStore('messages', { keyPath: 'id' });
-          // Indexes for quick lookup and sorting
           messageStore.createIndex('conversationId', 'conversationId', { unique: false });
           messageStore.createIndex('sequenceId', 'sequenceId', { unique: false });
+        }
+
+        // Create E2EE Device keys object store
+        if (!database.objectStoreNames.contains('device_keys')) {
+          database.createObjectStore('device_keys', { keyPath: 'id' });
+        }
+
+        // Create E2EE Ratchet sessions object store
+        if (!database.objectStoreNames.contains('ratchet_sessions')) {
+          database.createObjectStore('ratchet_sessions', { keyPath: 'sessionId' });
         }
       };
     });
   }
 
-  private getStore(storeName: 'conversations' | 'messages', mode: IDBTransactionMode): IDBObjectStore {
+  private getStore(
+    storeName: 'conversations' | 'messages' | 'device_keys' | 'ratchet_sessions',
+    mode: IDBTransactionMode
+  ): IDBObjectStore {
     if (!this.db) throw new Error('Database not initialized');
     const transaction = this.db.transaction(storeName, mode);
     return transaction.objectStore(storeName);
@@ -138,7 +150,6 @@ class LocalDbManager {
         const request = index.getAll(IDBKeyRange.only(conversationId));
         request.onsuccess = () => {
           const list = request.result || [];
-          // Sort locally by sequenceId asc
           list.sort((a, b) => a.sequenceId - b.sequenceId);
           resolve(list);
         };
@@ -156,10 +167,87 @@ class LocalDbManager {
         const request = store.getAll();
         request.onsuccess = () => {
           const list: Message[] = request.result || [];
-          // Unsent messages are marked as pending or have negative/mock sequence numbers
           const unsent = list.filter((m) => m.isPending || m.status === 'sent' && m.sequenceId > 1e11);
           resolve(unsent);
         };
+        request.onerror = () => reject(request.error);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  // E2EE KEYS
+  saveDeviceKeys(bundle: {
+    id: string;
+    deviceId: string;
+    ik: { privateKey: CryptoKey; publicKey: CryptoKey };
+    spk: { privateKey: CryptoKey; publicKey: CryptoKey };
+  }): Promise<void> {
+    return new Promise((resolve, reject) => {
+      try {
+        const store = this.getStore('device_keys', 'readwrite');
+        const request = store.put(bundle);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  getDeviceKeys(): Promise<{
+    id: string;
+    deviceId: string;
+    ik: { privateKey: CryptoKey; publicKey: CryptoKey };
+    spk: { privateKey: CryptoKey; publicKey: CryptoKey };
+  } | null> {
+    return new Promise((resolve, reject) => {
+      try {
+        const store = this.getStore('device_keys', 'readonly');
+        const request = store.get('local_bundle');
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  // E2EE RATCHET SESSIONS
+  saveRatchetSession(session: {
+    sessionId: string; // "remoteUserId:remoteDeviceId"
+    rootKey: Uint8Array;
+    sendingChainKey: Uint8Array;
+    receivingChainKey: Uint8Array;
+    ephemeralPublicKey?: string;
+    remoteIKPub: string;
+  }): Promise<void> {
+    return new Promise((resolve, reject) => {
+      try {
+        const store = this.getStore('ratchet_sessions', 'readwrite');
+        const request = store.put(session);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  getRatchetSession(sessionId: string): Promise<{
+    sessionId: string;
+    rootKey: Uint8Array;
+    sendingChainKey: Uint8Array;
+    receivingChainKey: Uint8Array;
+    ephemeralPublicKey?: string;
+    remoteIKPub: string;
+  } | null> {
+    return new Promise((resolve, reject) => {
+      try {
+        const store = this.getStore('ratchet_sessions', 'readonly');
+        const request = store.get(sessionId);
+        request.onsuccess = () => resolve(request.result || null);
         request.onerror = () => reject(request.error);
       } catch (err) {
         reject(err);
@@ -171,9 +259,14 @@ class LocalDbManager {
     return new Promise((resolve, reject) => {
       try {
         if (!this.db) throw new Error('Database not initialized');
-        const transaction = this.db.transaction(['conversations', 'messages'], 'readwrite');
+        const transaction = this.db.transaction(
+          ['conversations', 'messages', 'device_keys', 'ratchet_sessions'],
+          'readwrite'
+        );
         transaction.objectStore('conversations').clear();
         transaction.objectStore('messages').clear();
+        transaction.objectStore('device_keys').clear();
+        transaction.objectStore('ratchet_sessions').clear();
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => reject(transaction.error);
       } catch (err) {

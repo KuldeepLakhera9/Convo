@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, integer, primaryKey, boolean, unique } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, integer, primaryKey, boolean, unique, jsonb } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -39,7 +39,9 @@ export const messages = pgTable('messages', {
   content: text('content').notNull(),
   sequenceId: integer('sequence_id').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }), // Track message edit timestamps
+  updatedAt: timestamp('updated_at', { withTimezone: true }),
+  // E2EE encrypted payloads per device ID: { deviceId -> { ciphertext, iv, ephemeralPublicKey } }
+  encryptedPayloads: jsonb('encrypted_payloads'),
 }, (table) => {
   return {
     uniqueSeq: unique('unique_conversation_seq').on(table.conversationId, table.sequenceId),
@@ -56,5 +58,19 @@ export const messageStatuses = pgTable('message_statuses', {
 }, (table) => {
   return {
     uniqueMsgRecipient: unique('unique_message_recipient').on(table.messageId, table.recipientId),
+  };
+});
+
+// E2EE public prekey bundles registered per device/session of a user
+export const devicePrekeys = pgTable('device_prekeys', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  deviceId: text('device_id').notNull(),
+  identityKey: text('identity_key').notNull(), // SPKI base64 format public identity key
+  signedPrekey: text('signed_prekey').notNull(), // SPKI base64 format public signed prekey
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => {
+  return {
+    uniqueUserDevice: unique('unique_user_device').on(table.userId, table.deviceId),
   };
 });

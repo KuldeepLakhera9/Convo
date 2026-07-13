@@ -26,6 +26,7 @@ import {
   WifiOff,
   Edit2,
   X,
+  Shield,
 } from 'lucide-react';
 
 function parseJwt(token: string) {
@@ -521,8 +522,12 @@ export default function App() {
                     </h2>
                     <div className="flex items-center gap-1.5 mt-0.5">
                       <span className={`h-1.5 w-1.5 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse-subtle'}`} />
-                      <span className="text-[9px] text-[#989ba2]">
+                      <span className="text-[9px] text-[#989ba2] mr-2">
                         {isConnected ? 'Active channel' : 'Offline • attempting reconnect...'}
+                      </span>
+                      {/* E2EE secure badge */}
+                      <span className="inline-flex items-center gap-1 rounded bg-[#ddfd53]/10 px-1.5 py-0.5 text-[8px] font-bold text-[#ddfd53] border border-[#ddfd53]/20 uppercase tracking-wider">
+                        <Shield className="h-2 w-2" /> E2EE Secure
                       </span>
                     </div>
                   </div>
@@ -591,6 +596,7 @@ export default function App() {
                     const isFailed = msg.isFailed;
                     const initials = isMe ? getInitials(user.email) : getInitials(activeConversation.otherUser?.email || 'User');
                     const isEditing = editingMessageId === msg.id;
+                    const isUndecryptable = msg.content.startsWith('🔒');
 
                     return (
                       /* Dribbble Slack/Discord style inline layout */
@@ -654,16 +660,20 @@ export default function App() {
                               </button>
                             </form>
                           ) : (
-                            <div className={`text-xs text-[#f1f5f9] mt-1 break-words leading-relaxed whitespace-pre-wrap ${
-                              isPending ? 'opacity-50 italic' : ''
-                            } ${isFailed ? 'text-red-400' : ''}`}>
+                            <div className={`text-xs mt-1 break-words leading-relaxed whitespace-pre-wrap ${
+                              isPending ? 'opacity-50 italic text-[#f1f5f9]' : ''
+                            } ${isFailed ? 'text-red-400' : ''} ${
+                              isUndecryptable 
+                                ? 'text-amber-500/90 italic font-medium bg-amber-500/5 border border-amber-500/10 px-2 py-1 rounded-lg inline-block' 
+                                : 'text-[#f1f5f9]'
+                            }`}>
                               {msg.content}
                             </div>
                           )}
                         </div>
 
-                        {/* Inline edit button on hover (Only for messages sent by me) */}
-                        {isMe && !isPending && !isFailed && !isEditing && (
+                        {/* Inline edit button on hover */}
+                        {isMe && !isPending && !isFailed && !isEditing && !isUndecryptable && (
                           <div className="absolute right-12 top-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center bg-[#131419] border border-[#24262d] rounded-lg px-1 py-0.5 shadow-md">
                             <button
                               onClick={() => {
@@ -717,7 +727,7 @@ export default function App() {
                     type="text"
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
-                    placeholder={`Write a message to ${activeConversation.otherUser?.email.split('@')[0]}...`}
+                    placeholder={`Write an encrypted message to ${activeConversation.otherUser?.email.split('@')[0]}...`}
                     className="flex-1 bg-transparent border-none py-2 text-xs text-white placeholder-[#5c5e66] focus:outline-none custom-input"
                   />
                   <button

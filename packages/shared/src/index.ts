@@ -22,11 +22,26 @@ export interface Message {
   status: 'sent' | 'delivered' | 'read'; // Added delivery state tracking
   isPending?: boolean; // For client optimistic UI
   isFailed?: boolean;   // For client error UI
+  // E2EE properties: mapping deviceId -> ciphertext payload
+  encryptedPayloads?: Record<string, any>;
 }
 
 export interface AuthResponse {
   user: User;
   accessToken: string;
+}
+
+export interface PrekeyRegistration {
+  deviceId: string;
+  identityKey: string; // SPKI base64
+  signedPrekey: string; // SPKI base64
+}
+
+export interface PrekeyBundle {
+  userId: string;
+  deviceId: string;
+  identityKey: string; // SPKI base64
+  signedPrekey: string; // SPKI base64
 }
 
 // WebSocket Event Payloads
@@ -37,6 +52,7 @@ export type WsMessage =
         id: string; // client-generated UUID for deduplication
         conversationId: string;
         content: string;
+        encryptedPayloads?: Record<string, any>;
       };
     }
   | {
