@@ -9,8 +9,19 @@ import {
   Loader2,
   AlertCircle,
   CheckCircle2,
+  Search,
+  Settings,
+  Bell,
+  Phone,
+  Video,
+  Pin,
   Users,
-  Hash,
+  Paperclip,
+  ChevronDown,
+  ChevronUp,
+  Image,
+  Link2,
+  FileText,
 } from 'lucide-react';
 
 function parseJwt(token: string) {
@@ -36,6 +47,12 @@ export default function App() {
   const [showUserSearch, setShowUserSearch] = useState(false);
   const [usersList, setUsersList] = useState<{ id: string; email: string }[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Right sidebar details toggle
+  const [showRightSidebar, setShowRightSidebar] = useState(true);
+  const [filesOpen, setFilesOpen] = useState(true);
+  const [linksOpen, setLinksOpen] = useState(false);
 
   // Messages input
   const [inputMessage, setInputMessage] = useState('');
@@ -112,9 +129,8 @@ export default function App() {
   useEffect(() => {
     if (!accessToken) return;
     const interval = setInterval(() => {
-      console.log('Triggering silent JWT token refresh...');
       handleTokenExpired();
-    }, 14 * 60 * 1000); // 14 mins
+    }, 14 * 60 * 1000);
 
     return () => clearInterval(interval);
   }, [accessToken]);
@@ -178,7 +194,6 @@ export default function App() {
         setEmail('');
         setPassword('');
       } else {
-        // For register, toggle to login page after successful registration
         setAuthMode('login');
         setAuthError('Registration successful! Please log in.');
       }
@@ -208,12 +223,22 @@ export default function App() {
 
   const activeConversation = conversations.find((c) => c.id === activeConversationId);
 
+  // Filter conversations based on query
+  const filteredConversations = conversations.filter((conv) =>
+    conv.otherUser?.email.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  // Get initial letters from email
+  const getInitials = (email: string) => {
+    return email.split('@')[0].substring(0, 2).toUpperCase();
+  };
+
   if (bootLoading) {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-slate-950 text-slate-100">
+      <div className="flex h-screen w-screen items-center justify-center bg-[#0b0c0f] text-slate-100">
         <div className="flex flex-col items-center gap-3">
-          <Loader2 className="h-10 w-10 animate-spin text-indigo-500" />
-          <p className="text-sm text-slate-400 font-medium tracking-wide">Initializing secure session...</p>
+          <Loader2 className="h-10 w-10 animate-spin text-[#ddfd53]" />
+          <p className="text-xs text-slate-400 font-semibold tracking-wider uppercase">Loading Workspace...</p>
         </div>
       </div>
     );
@@ -222,14 +247,14 @@ export default function App() {
   // AUTH SCREEN
   if (!user || !accessToken) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#090d16] px-4">
-        <div className="w-full max-w-md rounded-2xl glass-panel p-8 shadow-2xl transition-all duration-300">
+      <div className="flex min-h-screen items-center justify-center bg-[#0b0c0f] px-4">
+        <div className="w-full max-w-md rounded-2xl dribbble-panel p-8 shadow-2xl transition-all duration-300">
           <div className="flex flex-col items-center mb-8">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-600 shadow-lg shadow-indigo-600/30 mb-3">
-              <MessageSquare className="h-6 w-6 text-white" />
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#ddfd53] text-[#0b0c0f] shadow-lg shadow-[#ddfd53]/10 mb-3">
+              <span className="font-black text-xl">S</span>
             </div>
-            <h1 className="text-2xl font-bold tracking-tight text-white m-0">Convo</h1>
-            <p className="text-slate-400 text-xs mt-1">Real-time gapless message delivery</p>
+            <h1 className="text-xl font-bold tracking-tight text-white m-0">Sign In to Convo</h1>
+            <p className="text-[#989ba2] text-xs mt-1">Enterprise real-time communications</p>
           </div>
 
           <form onSubmit={handleAuthSubmit} className="space-y-5">
@@ -245,21 +270,21 @@ export default function App() {
             )}
 
             <div>
-              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                Email Address
+              <label className="block text-[10px] font-bold text-[#989ba2] uppercase tracking-wider mb-2">
+                Business Email
               </label>
               <input
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-lg bg-slate-900/50 border border-slate-700/50 px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
-                placeholder="you@example.com"
+                className="w-full rounded-lg bg-[#18191e] border border-[#24262d] px-3.5 py-2.5 text-xs text-white placeholder-[#5c5e66] focus:outline-none focus:border-[#ddfd53] transition-colors"
+                placeholder="you@domain.com"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+              <label className="block text-[10px] font-bold text-[#989ba2] uppercase tracking-wider mb-2">
                 Password
               </label>
               <input
@@ -267,7 +292,7 @@ export default function App() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-lg bg-slate-900/50 border border-slate-700/50 px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                className="w-full rounded-lg bg-[#18191e] border border-[#24262d] px-3.5 py-2.5 text-xs text-white placeholder-[#5c5e66] focus:outline-none focus:border-[#ddfd53] transition-colors"
                 placeholder="••••••••"
               />
             </div>
@@ -275,7 +300,7 @@ export default function App() {
             <button
               type="submit"
               disabled={authLoading}
-              className="w-full flex justify-center items-center rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 transition-all cursor-pointer shadow-lg shadow-indigo-600/20"
+              className="w-full flex justify-center items-center rounded-lg bg-[#ddfd53] text-[#0b0c0f] font-bold px-4 py-2.5 text-xs hover:bg-[#cbe64c] transition-all cursor-pointer shadow-lg shadow-[#ddfd53]/5"
             >
               {authLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -293,7 +318,7 @@ export default function App() {
                 setAuthMode(authMode === 'login' ? 'register' : 'login');
                 setAuthError(null);
               }}
-              className="text-xs text-indigo-400 hover:text-indigo-300 font-medium transition-colors cursor-pointer"
+              className="text-xs text-[#ddfd53] hover:underline font-bold transition-colors cursor-pointer"
             >
               {authMode === 'login'
                 ? "Don't have an account? Sign up"
@@ -307,112 +332,106 @@ export default function App() {
 
   // MAIN DASHBOARD SCREEN
   return (
-    <div className="flex h-screen w-screen bg-[#070b13] overflow-hidden">
-      {/* LEFT SIDEBAR: Conversations List */}
-      <aside className="w-80 border-r border-slate-800/60 bg-slate-950/40 flex flex-col shrink-0">
-        {/* Sidebar Header */}
-        <div className="h-16 border-b border-slate-800/60 flex items-center justify-between px-4 shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="h-7 w-7 rounded-lg bg-indigo-600 flex items-center justify-center shadow-md shadow-indigo-600/10">
-              <MessageSquare className="h-4 w-4 text-white" />
-            </div>
-            <span className="font-bold text-md text-white tracking-wide">Convo</span>
+    <div className="flex h-screen w-screen bg-[#0b0c0f] overflow-hidden p-3 gap-3">
+      {/* COLUMN 1: Far Left Slim Workspace Bar (~72px) */}
+      <nav className="w-[72px] dribbble-panel rounded-2xl flex flex-col items-center py-4 justify-between shrink-0 shadow-lg">
+        {/* Convo Branding Icon */}
+        <div className="flex flex-col items-center gap-6">
+          <div className="h-10 w-10 rounded-xl bg-[#ddfd53] text-[#0b0c0f] flex items-center justify-center font-black text-lg shadow-md shadow-[#ddfd53]/10">
+            S
           </div>
 
-          <button
-            onClick={handleOpenUserSearch}
-            title="New Chat"
-            className="h-8 w-8 rounded-lg bg-slate-800/40 hover:bg-indigo-600 hover:text-white border border-slate-800 flex items-center justify-center text-slate-300 transition-all cursor-pointer"
-          >
-            <Plus className="h-4.5 w-4.5" />
-          </button>
+          {/* Fake Workspace Channels */}
+          <div className="flex flex-col items-center gap-3">
+            <button className="h-10 w-10 rounded-full border border-slate-700 bg-slate-800 text-[10px] font-bold text-slate-300 hover:border-slate-500 hover:text-white transition-all cursor-pointer">
+              Work
+            </button>
+            <button className="h-10 w-10 rounded-full border border-[#ddfd53] bg-[#ddfd53]/10 text-[10px] font-bold text-[#ddfd53] transition-all cursor-pointer">
+              ICG
+            </button>
+            <button className="h-10 w-10 rounded-full border border-slate-800 bg-[#18191e] text-[10px] font-bold text-[#989ba2] hover:border-slate-700 hover:text-white transition-all cursor-pointer">
+              SP
+            </button>
+            <button className="h-10 w-10 rounded-full border border-slate-800 bg-[#18191e] text-[10px] font-bold text-[#989ba2] hover:border-slate-700 hover:text-white transition-all cursor-pointer">
+              BFF
+            </button>
+            <button className="h-10 w-10 rounded-full border border-slate-800 bg-[#18191e] text-[10px] font-bold text-[#989ba2] hover:border-slate-700 hover:text-white transition-all cursor-pointer">
+              MJ
+            </button>
+            <button className="h-10 w-10 rounded-full border border-slate-800 bg-[#18191e] text-[10px] font-bold text-[#989ba2] hover:border-slate-700 hover:text-white transition-all cursor-pointer">
+              GI
+            </button>
+          </div>
         </div>
 
-        {/* User Search Dialog overlay */}
-        {showUserSearch && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <div className="w-full max-w-sm rounded-xl glass-panel p-5 shadow-2xl">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="font-semibold text-white flex items-center gap-2 text-sm">
-                  <Users className="h-4 w-4 text-indigo-400" /> Start a New Chat
-                </h3>
-                <button
-                  onClick={() => setShowUserSearch(false)}
-                  className="text-xs text-slate-400 hover:text-white cursor-pointer"
-                >
-                  Close
-                </button>
-              </div>
+        {/* Action icons at the bottom */}
+        <div className="flex flex-col items-center gap-4">
+          <button
+            onClick={handleOpenUserSearch}
+            title="Start Conversation"
+            className="h-10 w-10 rounded-full bg-[#ddfd53] text-[#0b0c0f] flex items-center justify-center hover:bg-[#cbe64c] transition-all cursor-pointer"
+          >
+            <Plus className="h-5 w-5" />
+          </button>
+          <button className="text-[#989ba2] hover:text-white transition-colors cursor-pointer">
+            <Settings className="h-5 w-5" />
+          </button>
+        </div>
+      </nav>
 
-              {searchLoading ? (
-                <div className="flex justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin text-indigo-400" />
-                </div>
-              ) : usersList.length === 0 ? (
-                <p className="text-center text-xs text-slate-400 py-6">No other users found on the server.</p>
-              ) : (
-                <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1">
-                  {usersList.map((usr) => (
-                    <button
-                      key={usr.id}
-                      onClick={async () => {
-                        const cid = await startConversation(usr.id);
-                        if (cid) {
-                          setActiveConversationId(cid);
-                        }
-                        setShowUserSearch(false);
-                      }}
-                      className="w-full flex items-center gap-2.5 rounded-lg bg-slate-900/40 hover:bg-indigo-600/30 border border-slate-800/50 p-2.5 text-left text-xs transition-colors cursor-pointer text-slate-200"
-                    >
-                      <div className="h-6 w-6 rounded-full bg-slate-800 flex items-center justify-center shrink-0">
-                        <User className="h-3 w-3 text-indigo-400" />
-                      </div>
-                      <span className="truncate">{usr.email}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+      {/* COLUMN 2: Chats Directory Pane (~280px) */}
+      <aside className="w-[280px] dribbble-panel rounded-2xl flex flex-col overflow-hidden shadow-lg shrink-0">
+        {/* Search Header */}
+        <div className="p-4 border-b border-[#24262d]">
+          <div className="relative">
+            <Search className="absolute left-3.5 top-3 h-4 w-4 text-[#5c5e66]" />
+            <input
+              type="text"
+              placeholder="Search chats"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full rounded-xl bg-[#18191e] border border-[#24262d] pl-9 pr-4 py-2 text-xs text-white placeholder-[#5c5e66] focus:outline-none focus:border-[#ddfd53] transition-colors"
+            />
           </div>
-        )}
+        </div>
 
-        {/* Conversation List */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
-          {conversations.length === 0 ? (
-            <div className="h-full flex flex-col justify-center items-center text-center p-4">
-              <MessageSquare className="h-8 w-8 text-slate-700 mb-2" />
-              <p className="text-xs text-slate-500">No active conversations</p>
-              <button
-                onClick={handleOpenUserSearch}
-                className="mt-3 text-xs bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 border border-indigo-500/20 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
-              >
-                Find users
-              </button>
-            </div>
+        {/* Directory Contacts list */}
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          <div className="px-2 py-1 text-[10px] font-bold text-[#5c5e66] uppercase tracking-wider">
+            Direct Messages
+          </div>
+          
+          {filteredConversations.length === 0 ? (
+            <div className="text-center py-8 text-xs text-[#5c5e66]">No chats found</div>
           ) : (
-            conversations.map((conv) => {
+            filteredConversations.map((conv) => {
               const isActive = conv.id === activeConversationId;
+              const userInitials = getInitials(conv.otherUser?.email || 'User');
               return (
                 <button
                   key={conv.id}
                   onClick={() => setActiveConversationId(conv.id)}
-                  className={`w-full flex items-center gap-3 rounded-xl p-3 text-left transition-all cursor-pointer border ${
+                  className={`w-full flex items-center gap-3 rounded-xl p-3 text-left transition-all border cursor-pointer ${
                     isActive
-                      ? 'bg-indigo-600/15 border-indigo-500/30 shadow-inner'
-                      : 'bg-slate-900/10 hover:bg-slate-900/30 border-transparent'
+                      ? 'bg-[#24262d] border-[#24262d]'
+                      : 'bg-transparent border-transparent hover:bg-[#18191e]/50'
                   }`}
                 >
-                  <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${
-                    isActive ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400'
-                  }`}>
-                    <User className="h-4 w-4" />
+                  {/* Initials Avatar badge */}
+                  <div className="h-9 w-9 rounded-full bg-[#18191e] border border-[#24262d] flex items-center justify-center font-bold text-[10px] text-slate-300 relative shrink-0">
+                    {userInitials}
+                    <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 border-2 border-[#131419]" />
                   </div>
+                  
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-slate-100 truncate">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-white truncate pr-1">
+                        {conv.otherUser?.email.split('@')[0]}
+                      </span>
+                      <span className="text-[9px] text-[#5c5e66]">Active</span>
+                    </div>
+                    <p className="text-[10px] text-[#989ba2] truncate mt-0.5">
                       {conv.otherUser?.email}
-                    </p>
-                    <p className="text-[10px] text-slate-500 truncate mt-0.5">
-                      Open active discussion
                     </p>
                   </div>
                 </button>
@@ -421,109 +440,168 @@ export default function App() {
           )}
         </div>
 
-        {/* Sidebar Footer (Profile Info & Logout) */}
-        <div className="h-16 border-t border-slate-800/60 bg-slate-950/60 flex items-center justify-between px-4 shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="h-7 w-7 rounded-full bg-slate-800 flex items-center justify-center shrink-0 border border-slate-700/50">
-              <User className="h-3.5 w-3.5 text-indigo-400" />
+        {/* Current User Card */}
+        <div className="p-3 border-t border-[#24262d] bg-[#18191e]/40 flex items-center justify-between">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="h-8 w-8 rounded-full bg-[#ddfd53] text-[#0b0c0f] flex items-center justify-center font-black text-xs shrink-0">
+              {user.email.substring(0, 2).toUpperCase()}
             </div>
-            <span className="text-xs text-slate-300 truncate font-medium">{user.email}</span>
+            <div className="min-w-0">
+              <span className="block text-xs font-bold text-white truncate">
+                {user.email.split('@')[0]}
+              </span>
+              <span className="block text-[10px] text-[#989ba2] truncate">{user.email}</span>
+            </div>
           </div>
-
           <button
             onClick={handleLogout}
-            title="Sign Out"
-            className="h-8 w-8 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 flex items-center justify-center transition-colors cursor-pointer"
+            title="Log Out"
+            className="text-[#989ba2] hover:text-red-400 p-1.5 rounded-lg hover:bg-red-500/10 transition-all cursor-pointer"
           >
             <LogOut className="h-4.5 w-4.5" />
           </button>
         </div>
       </aside>
 
-      {/* RIGHT ACTIVE CHAT VIEW */}
-      <main className="flex-1 flex flex-col bg-slate-950/10 relative">
+      {/* COLUMN 3: Central Chat Messages viewport */}
+      <main className="flex-1 dribbble-panel rounded-2xl flex flex-col overflow-hidden shadow-lg">
         {activeConversation ? (
           <>
             {/* Chat Pane Header */}
-            <header className="h-16 border-b border-slate-800/60 px-6 flex items-center justify-between shrink-0 glass-panel-light">
+            <header className="h-16 border-b border-[#24262d] px-6 flex items-center justify-between shrink-0 bg-[#18191e]/15">
               <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-full bg-slate-800 flex items-center justify-center text-slate-300 border border-slate-700">
-                  <User className="h-5 w-5" />
+                <div className="h-9 w-9 rounded-full bg-[#18191e] border border-[#24262d] flex items-center justify-center font-bold text-xs text-white">
+                  {getInitials(activeConversation.otherUser?.email || 'User')}
                 </div>
                 <div>
-                  <h2 className="text-sm font-semibold text-white m-0 leading-tight">
+                  <h2 className="text-xs font-bold text-white m-0">
                     {activeConversation.otherUser?.email}
                   </h2>
                   <div className="flex items-center gap-1.5 mt-0.5">
                     <span className={`h-1.5 w-1.5 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse-subtle'}`} />
-                    <span className="text-[10px] text-slate-400">
-                      {isConnected ? 'connected' : 'connecting...'}
+                    <span className="text-[9px] text-[#989ba2]">
+                      {isConnected ? 'Active channel' : 'reconnecting...'}
                     </span>
                   </div>
                 </div>
               </div>
+
+              {/* Utility header controls */}
+              <div className="flex items-center gap-3">
+                <div className="relative w-44">
+                  <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-[#5c5e66]" />
+                  <input
+                    type="text"
+                    placeholder="Search thread"
+                    className="w-full rounded-lg bg-[#18191e] border border-[#24262d] pl-8 pr-3 py-1.5 text-[10px] text-white focus:outline-none focus:border-[#ddfd53] transition-colors"
+                  />
+                </div>
+                <button className="text-[#989ba2] hover:text-white cursor-pointer"><Bell className="h-4 w-4" /></button>
+                <button
+                  onClick={() => setShowRightSidebar(!showRightSidebar)}
+                  className={`text-[#989ba2] hover:text-white cursor-pointer ${showRightSidebar ? 'text-white' : ''}`}
+                >
+                  <Users className="h-4 w-4" />
+                </button>
+              </div>
             </header>
 
-            {/* Messages Viewport */}
-            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-3.5">
-              {activeMessages.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-center">
-                  <div className="p-3 rounded-full bg-slate-900 border border-slate-800/50 mb-3">
-                    <MessageSquare className="h-6 w-6 text-slate-500" />
+            {/* Chat Messages Log */}
+            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
+              
+              {/* Premium Shared Space Banner (matching screenshot mockup) */}
+              <div className="rounded-xl overflow-hidden dribbble-card border border-[#24262d]">
+                <div className="relative h-28 bg-[#1f2028] overflow-hidden flex items-center justify-center">
+                  {/* Mock scenic image representing premium game/landscape banner */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent z-10" />
+                  <img
+                    src="/Users/kuldeeplakhera/.gemini/antigravity-ide/brain/b913b2bd-a9aa-4e7a-9ace-95252c505a7b/initial_page_1783918540828.png"
+                    alt="Shared banner"
+                    onError={(e) => {
+                      // Fallback if path doesn't load
+                      e.currentTarget.src = "https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=600&auto=format&fit=crop&q=60";
+                    }}
+                    className="w-full h-full object-cover opacity-60"
+                  />
+                  <div className="absolute bottom-3 left-4 z-20">
+                    <span className="text-[10px] font-bold bg-[#ddfd53] text-[#0b0c0f] px-2 py-0.5 rounded-full uppercase tracking-wider">
+                      Shared Banner
+                    </span>
+                    <h4 className="text-xs font-bold text-white mt-1">Convo secure workspace space initialized</h4>
                   </div>
-                  <h3 className="text-sm font-semibold text-slate-300">Start of conversation</h3>
-                  <p className="text-xs text-slate-500 mt-1">Send a message to begin discussing.</p>
+                </div>
+              </div>
+
+              {/* Date separator divider */}
+              <div className="flex items-center justify-center my-6">
+                <div className="h-px bg-[#24262d] flex-1" />
+                <span className="px-3 py-1 rounded-full bg-[#18191e] border border-[#24262d] text-[9px] font-bold text-[#989ba2] uppercase tracking-wider">
+                  Timeline
+                </span>
+                <div className="h-px bg-[#24262d] flex-1" />
+              </div>
+
+              {activeMessages.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 text-center">
+                  <p className="text-xs text-[#5c5e66]">No messages yet. Type in the input below to begin chat.</p>
                 </div>
               ) : (
                 activeMessages.map((msg) => {
                   const isMe = msg.senderId === user.id;
                   const isPending = msg.isPending;
                   const isFailed = msg.isFailed;
+                  const initials = isMe ? getInitials(user.email) : getInitials(activeConversation.otherUser?.email || 'User');
 
                   return (
-                    <div
-                      key={msg.id}
-                      className={`flex ${isMe ? 'justify-end' : 'justify-start'} group`}
-                    >
-                      <div
-                        className={`max-w-[70%] rounded-xl px-4 py-2.5 border shadow-sm transition-all duration-200 ${
-                          isMe
-                            ? `bg-slate-900/80 border-indigo-500/20 text-white ${
-                                isPending ? 'opacity-55 scale-[0.98]' : ''
-                              } ${isFailed ? 'border-red-500/40 bg-red-950/20' : ''}`
-                            : 'bg-indigo-950/30 border-white/5 text-slate-100'
-                        }`}
-                      >
-                        <p className="text-xs break-words whitespace-pre-wrap">{msg.content}</p>
+                    /* Dribbble Slack/Discord style inline layout (no bubble wrappers!) */
+                    <div key={msg.id} className="flex items-start gap-3.5 group">
+                      {/* User Avatar */}
+                      <div className={`h-8 w-8 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 border ${
+                        isMe ? 'bg-[#ddfd53] text-[#0b0c0f] border-[#ddfd53]/10' : 'bg-[#18191e] text-slate-300 border-[#24262d]'
+                      }`}>
+                        {initials}
+                      </div>
 
-                        <div className="flex items-center justify-end gap-2.5 mt-1.5">
-                          {/* Display database message sequence ID */}
-                          <span className="text-[9px] text-slate-500 font-mono flex items-center gap-0.5">
-                            <Hash className="h-2 w-2 shrink-0" />
-                            {msg.sequenceId > 0 && msg.sequenceId < 1e11 ? msg.sequenceId : '...'}
+                      {/* Message Content block */}
+                      <div className="flex-1 min-w-0">
+                        {/* Header details */}
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-xs font-bold text-white hover:underline cursor-pointer">
+                            {isMe ? user.email.split('@')[0] : activeConversation.otherUser?.email.split('@')[0]}
                           </span>
-
-                          <span className="text-[9px] text-slate-500">
+                          <span className="text-[9px] text-[#5c5e66]">
                             {new Date(msg.createdAt).toLocaleTimeString([], {
                               hour: '2-digit',
                               minute: '2-digit',
                             })}
                           </span>
+                          
+                          {/* Monotonic sequence tag with custom styling */}
+                          <span className="text-[9px] font-mono text-[#ddfd53]/60 bg-[#ddfd53]/5 px-1.5 py-0.5 rounded border border-[#ddfd53]/10">
+                            #{msg.sequenceId > 0 && msg.sequenceId < 1e11 ? msg.sequenceId : 'pending'}
+                          </span>
+                        </div>
 
-                          {/* Message status icon */}
-                          {isMe && (
-                            <span className="flex items-center">
-                              {isPending ? (
-                                <Loader2 className="h-2.5 w-2.5 animate-spin text-indigo-400" />
-                              ) : isFailed ? (
-                                <AlertCircle className="h-2.5 w-2.5 text-red-400" />
-                              ) : (
-                                <CheckCircle2 className="h-2.5 w-2.5 text-indigo-400" />
-                              )}
-                            </span>
-                          )}
+                        {/* Content text */}
+                        <div className={`text-xs text-[#f1f5f9] mt-1 break-words leading-relaxed whitespace-pre-wrap ${
+                          isPending ? 'opacity-50 italic' : ''
+                        } ${isFailed ? 'text-red-400' : ''}`}>
+                          {msg.content}
                         </div>
                       </div>
+
+                      {/* Status Check indicators */}
+                      {isMe && (
+                        <div className="self-center shrink-0">
+                          {isPending ? (
+                            <Loader2 className="h-3 w-3 animate-spin text-[#ddfd53]" />
+                          ) : isFailed ? (
+                            <AlertCircle className="h-3 w-3 text-red-500" />
+                          ) : (
+                            <CheckCircle2 className="h-3 w-3 text-[#ddfd53]/80" />
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })
@@ -531,20 +609,23 @@ export default function App() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Message input */}
-            <div className="p-4 border-t border-slate-800/60 glass-panel-light shrink-0">
-              <form onSubmit={handleSend} className="flex gap-2 max-w-4xl mx-auto">
+            {/* Input Message panel */}
+            <div className="p-4 border-t border-[#24262d] bg-[#131419]/35 shrink-0">
+              <form onSubmit={handleSend} className="max-w-4xl mx-auto flex items-center gap-3 rounded-2xl bg-[#18191e] border border-[#24262d] px-4 py-2">
+                <button type="button" className="text-[#989ba2] hover:text-white p-1.5 rounded-lg transition-colors cursor-pointer">
+                  <Paperclip className="h-4.5 w-4.5" />
+                </button>
                 <input
                   type="text"
                   value={inputMessage}
                   onChange={(e) => setInputMessage(e.target.value)}
-                  placeholder="Type a message..."
-                  className="flex-1 rounded-xl bg-slate-900/50 border border-slate-800/80 px-4 py-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                  placeholder={`Write a message to ${activeConversation.otherUser?.email.split('@')[0]}...`}
+                  className="flex-1 bg-transparent border-none py-2 text-xs text-white placeholder-[#5c5e66] focus:outline-none custom-input"
                 />
                 <button
                   type="submit"
                   disabled={!inputMessage.trim()}
-                  className="h-10 w-10 shrink-0 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center transition-all cursor-pointer disabled:opacity-40 disabled:hover:bg-indigo-600 shadow-md shadow-indigo-600/15"
+                  className="h-9 w-9 rounded-xl bg-[#ddfd53] hover:bg-[#cbe64c] disabled:opacity-30 disabled:hover:bg-[#ddfd53] text-[#0b0c0f] flex items-center justify-center transition-all cursor-pointer shrink-0"
                 >
                   <Send className="h-4 w-4" />
                 </button>
@@ -552,18 +633,176 @@ export default function App() {
             </div>
           </>
         ) : (
-          /* Empty Chat state */
+          /* Empty Active Chat Panel */
           <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-            <div className="h-14 w-14 rounded-2xl bg-slate-900 border border-slate-850 flex items-center justify-center shadow-lg shadow-black/10 mb-4">
-              <MessageSquare className="h-7 w-7 text-indigo-400" />
+            <div className="h-14 w-14 rounded-2xl bg-[#18191e] border border-[#24262d] flex items-center justify-center mb-4">
+              <MessageSquare className="h-6 w-6 text-[#ddfd53]" />
             </div>
-            <h2 className="text-md font-semibold text-slate-200 m-0">No active thread</h2>
-            <p className="text-xs text-slate-500 max-w-sm mt-1.5 leading-relaxed">
-              Select an existing contact from the left panel, or start a new conversation to begin secure messaging.
+            <h2 className="text-sm font-bold text-white m-0">No active thread</h2>
+            <p className="text-xs text-[#989ba2] max-w-xs mt-1.5 leading-relaxed">
+              Select a conversation in the directory list, or click the **`+`** icon to search and initiate a discussion.
             </p>
           </div>
         )}
       </main>
+
+      {/* COLUMN 4: Right Context details sidebar (~280px, toggled) */}
+      {activeConversation && showRightSidebar && (
+        <aside className="w-[280px] dribbble-panel rounded-2xl flex flex-col overflow-hidden shadow-lg shrink-0 bg-[#131419]">
+          {/* Quick actions bar */}
+          <div className="p-4 border-b border-[#24262d] flex items-center justify-around bg-[#18191e]/20">
+            <button className="h-8 w-8 rounded-full bg-[#ddfd53]/10 border border-[#ddfd53]/25 flex items-center justify-center text-[#ddfd53] hover:bg-[#ddfd53]/20 transition-all cursor-pointer">
+              <Phone className="h-3.5 w-3.5" />
+            </button>
+            <button className="h-8 w-8 rounded-full bg-[#18191e] border border-[#24262d] flex items-center justify-center text-slate-300 hover:text-white transition-all cursor-pointer">
+              <Video className="h-3.5 w-3.5" />
+            </button>
+            <button className="h-8 w-8 rounded-full bg-[#18191e] border border-[#24262d] flex items-center justify-center text-slate-300 hover:text-white transition-all cursor-pointer">
+              <Pin className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          {/* Members list */}
+          <div className="p-4 border-b border-[#24262d]">
+            <h3 className="text-xs font-bold text-white mb-3">Members</h3>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="h-7 w-7 rounded-full bg-[#18191e] border border-[#24262d] flex items-center justify-center font-bold text-[10px] text-white shrink-0">
+                    {getInitials(activeConversation.otherUser?.email)}
+                  </div>
+                  <span className="text-xs font-semibold text-slate-300 truncate">
+                    {activeConversation.otherUser?.email.split('@')[0]}
+                  </span>
+                </div>
+                <span className="text-[9px] font-bold text-[#5c5e66] uppercase">Member</span>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="h-7 w-7 rounded-full bg-[#ddfd53] text-[#0b0c0f] flex items-center justify-center font-bold text-[10px] shrink-0">
+                    {getInitials(user.email)}
+                  </div>
+                  <span className="text-xs font-semibold text-slate-300 truncate">
+                    {user.email.split('@')[0]} (You)
+                  </span>
+                </div>
+                <span className="text-[9px] font-bold text-[#ddfd53] uppercase">Admin</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Files Accordion */}
+          <div className="border-b border-[#24262d]">
+            <button
+              onClick={() => setFilesOpen(!filesOpen)}
+              className="w-full flex items-center justify-between p-4 text-xs font-bold text-white hover:bg-[#18191e]/40 transition-colors cursor-pointer"
+            >
+              <span>Files</span>
+              {filesOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </button>
+            
+            {filesOpen && (
+              <div className="px-4 pb-4 space-y-2">
+                <div className="flex items-center gap-2.5 rounded-lg bg-[#18191e]/40 p-2 border border-[#24262d]/50 text-left">
+                  <div className="h-7 w-7 rounded bg-[#24262d] flex items-center justify-center shrink-0">
+                    <FileText className="h-4 w-4 text-indigo-400" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-semibold text-slate-300 truncate">project_spec.pdf</p>
+                    <p className="text-[9px] text-[#5c5e66]">1.2 MB • PDF Document</p>
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-2.5 rounded-lg bg-[#18191e]/40 p-2 border border-[#24262d]/50 text-left">
+                  <div className="h-7 w-7 rounded bg-[#24262d] flex items-center justify-center shrink-0">
+                    <Image className="h-4 w-4 text-emerald-400" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-semibold text-slate-300 truncate">design_reference.png</p>
+                    <p className="text-[9px] text-[#5c5e66]">3.4 MB • PNG Image</p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Links Accordion */}
+          <div className="border-b border-[#24262d]">
+            <button
+              onClick={() => setLinksOpen(!linksOpen)}
+              className="w-full flex items-center justify-between p-4 text-xs font-bold text-white hover:bg-[#18191e]/40 transition-colors cursor-pointer"
+            >
+              <span>Shared links</span>
+              {linksOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </button>
+
+            {linksOpen && (
+              <div className="px-4 pb-4 space-y-2">
+                <div className="flex items-center gap-2 rounded-lg bg-[#18191e]/40 p-2 border border-[#24262d]/50 text-left">
+                  <Link2 className="h-3.5 w-3.5 text-[#ddfd53] shrink-0" />
+                  <a
+                    href="https://dribbble.com"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[10px] text-slate-300 truncate hover:underline"
+                  >
+                    https://dribbble.com/shots/24911746
+                  </a>
+                </div>
+              </div>
+            )}
+          </div>
+        </aside>
+      )}
+
+      {/* User Search Dialog overlay */}
+      {showUserSearch && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-[#131419] border border-[#24262d] p-5 shadow-2xl">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold text-white flex items-center gap-2 text-xs">
+                <Users className="h-4 w-4 text-[#ddfd53]" /> Start a New Chat
+              </h3>
+              <button
+                onClick={() => setShowUserSearch(false)}
+                className="text-xs text-slate-400 hover:text-white cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+
+            {searchLoading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-[#ddfd53]" />
+              </div>
+            ) : usersList.length === 0 ? (
+              <p className="text-center text-xs text-[#5c5e66] py-6">No other users found.</p>
+            ) : (
+              <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1">
+                {usersList.map((usr) => (
+                  <button
+                    key={usr.id}
+                    onClick={async () => {
+                      const cid = await startConversation(usr.id);
+                      if (cid) {
+                        setActiveConversationId(cid);
+                      }
+                      setShowUserSearch(false);
+                    }}
+                    className="w-full flex items-center gap-2.5 rounded-xl bg-[#18191e]/60 hover:bg-[#ddfd53]/10 border border-[#24262d] p-2.5 text-left text-xs transition-colors cursor-pointer text-slate-200"
+                  >
+                    <div className="h-6 w-6 rounded-full bg-[#24262d] flex items-center justify-center shrink-0">
+                      <User className="h-3 w-3 text-[#ddfd53]" />
+                    </div>
+                    <span className="truncate">{usr.email}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

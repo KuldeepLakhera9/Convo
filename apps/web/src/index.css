@@ -1,16 +1,28 @@
 @import "tailwindcss";
 
-/* Custom Glassmorphism Theme Settings and Variables */
+/* Dribbble Professional Chat Theme Variable Setup */
 :root {
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  
+  /* Palette Colors */
+  --color-bg-main: #0b0c0f;      /* Pure matte black-gray */
+  --color-panel: #131419;        /* Dark gray panels */
+  --color-card: #18191e;         /* Slightly lighter container cards */
+  --color-border: #24262d;       /* Thin sleek borders */
+  --color-accent: #ddfd53;       /* Vibrant neon lime-yellow */
+  --color-accent-hover: #cbe64c;
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #989ba2;
+  --color-text-muted: #5c5e66;
 }
 
 body {
   margin: 0;
   font-family: var(--font-sans);
-  background-color: #0f172a; /* Slate 900 background */
-  color: #f1f5f9; /* Slate 100 text */
+  background-color: var(--color-bg-main);
+  color: var(--color-text-primary);
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
 }
 
 #root {
@@ -22,25 +34,10 @@ body {
   text-align: left;
 }
 
-/* Custom utility for glassmorphism */
-.glass-panel {
-  background: rgba(30, 41, 59, 0.45); /* Slate 800 with opacity */
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.glass-panel-light {
-  background: rgba(30, 41, 59, 0.25);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.04);
-}
-
-/* Custom Scrollbar */
+/* Custom CSS Scrollbar to match Dribbble look */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
 }
 
 ::-webkit-scrollbar-track {
@@ -48,20 +45,35 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.15);
-  border-radius: 9999px;
+  background: rgba(152, 155, 162, 0.12);
+  border-radius: 99px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.3);
+  background: rgba(152, 155, 162, 0.3);
 }
 
-/* Keyframes for micro-animations */
-@keyframes pulse-subtle {
-  0%, 100% { opacity: 0.6; }
-  50% { opacity: 1; }
+/* Glassmorphism overrides if needed */
+.dribbble-panel {
+  background-color: var(--color-panel);
+  border: 1px solid var(--color-border);
 }
 
-.animate-pulse-subtle {
-  animation: pulse-subtle 1.5s infinite ease-in-out;
+.dribbble-card {
+  background-color: var(--color-card);
+  border: 1px solid var(--color-border);
+}
+
+/* Micro-animations */
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 8s linear infinite;
+}
+
+.custom-input::placeholder {
+  color: var(--color-text-muted);
 }
