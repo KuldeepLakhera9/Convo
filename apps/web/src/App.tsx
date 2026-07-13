@@ -24,6 +24,8 @@ import {
   Check,
   CheckCheck,
   WifiOff,
+  Edit2,
+  X,
 } from 'lucide-react';
 
 function parseJwt(token: string) {
@@ -60,6 +62,10 @@ export default function App() {
   const [inputMessage, setInputMessage] = useState('');
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
+  // Message Editing state
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState('');
+
   // Trigger token refresh
   const handleTokenExpired = async (): Promise<string | null> => {
     try {
@@ -92,6 +98,7 @@ export default function App() {
     isConnected,
     isSyncing,
     sendMessage,
+    editMessage,
     startConversation,
   } = useChat({
     accessToken,
@@ -222,6 +229,14 @@ export default function App() {
     if (!inputMessage.trim()) return;
     sendMessage(inputMessage);
     setInputMessage('');
+  };
+
+  // Handle Edit submit
+  const handleEditSubmit = (e: React.FormEvent, messageId: string) => {
+    e.preventDefault();
+    if (!editContent.trim()) return;
+    editMessage(messageId, editContent);
+    setEditingMessageId(null);
   };
 
   const activeConversation = conversations.find((c) => c.id === activeConversationId);
@@ -575,10 +590,11 @@ export default function App() {
                     const isPending = msg.isPending;
                     const isFailed = msg.isFailed;
                     const initials = isMe ? getInitials(user.email) : getInitials(activeConversation.otherUser?.email || 'User');
+                    const isEditing = editingMessageId === msg.id;
 
                     return (
                       /* Dribbble Slack/Discord style inline layout */
-                      <div key={msg.id} className="flex items-start gap-3.5 group">
+                      <div key={msg.id} className="flex items-start gap-3.5 group relative">
                         {/* User Avatar */}
                         <div className={`h-8 w-8 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 border ${
                           isMe ? 'bg-[#ddfd53] text-[#0b0c0f] border-[#ddfd53]/10' : 'bg-[#18191e] text-slate-300 border-[#24262d]'
@@ -600,21 +616,69 @@ export default function App() {
                               })}
                             </span>
                             
+                            {/* Edited status tag */}
+                            {msg.updatedAt && (
+                              <span className="text-[9px] text-[#5c5e66] italic" title={`Edited at ${new Date(msg.updatedAt).toLocaleString()}`}>
+                                (edited)
+                              </span>
+                            )}
+
                             {/* Monotonic sequence tag */}
                             <span className="text-[9px] font-mono text-[#ddfd53]/60 bg-[#ddfd53]/5 px-1.5 py-0.5 rounded border border-[#ddfd53]/10">
                               #{msg.sequenceId > 0 && msg.sequenceId < 1e11 ? msg.sequenceId : 'pending'}
                             </span>
                           </div>
 
-                          {/* Content text */}
-                          <div className={`text-xs text-[#f1f5f9] mt-1 break-words leading-relaxed whitespace-pre-wrap ${
-                            isPending ? 'opacity-50 italic' : ''
-                          } ${isFailed ? 'text-red-400' : ''}`}>
-                            {msg.content}
-                          </div>
+                          {/* Content text / Edit Mode view */}
+                          {isEditing ? (
+                            <form onSubmit={(e) => handleEditSubmit(e, msg.id)} className="flex items-center gap-2 mt-1.5 max-w-xl">
+                              <input
+                                type="text"
+                                value={editContent}
+                                onChange={(e) => setEditContent(e.target.value)}
+                                className="flex-1 bg-[#18191e] border border-[#24262d] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-[#ddfd53]"
+                                autoFocus
+                              />
+                              <button
+                                type="submit"
+                                className="bg-[#ddfd53] text-[#0b0c0f] font-bold rounded-lg px-2.5 py-1.5 text-[10px] hover:bg-[#cbe64c] transition-colors cursor-pointer shrink-0"
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingMessageId(null)}
+                                className="bg-[#18191e] text-slate-400 border border-[#24262d] rounded-lg px-2 py-1.5 text-[10px] hover:text-white transition-colors cursor-pointer shrink-0"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </form>
+                          ) : (
+                            <div className={`text-xs text-[#f1f5f9] mt-1 break-words leading-relaxed whitespace-pre-wrap ${
+                              isPending ? 'opacity-50 italic' : ''
+                            } ${isFailed ? 'text-red-400' : ''}`}>
+                              {msg.content}
+                            </div>
+                          )}
                         </div>
 
-                        {/* Status Check Indicators (sent -> delivered -> read double ticks) */}
+                        {/* Inline edit button on hover (Only for messages sent by me) */}
+                        {isMe && !isPending && !isFailed && !isEditing && (
+                          <div className="absolute right-12 top-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center bg-[#131419] border border-[#24262d] rounded-lg px-1 py-0.5 shadow-md">
+                            <button
+                              onClick={() => {
+                                setEditingMessageId(msg.id);
+                                setEditContent(msg.content);
+                              }}
+                              title="Edit Message"
+                              className="text-[#989ba2] hover:text-[#ddfd53] p-1 transition-colors cursor-pointer"
+                            >
+                              <Edit2 className="h-3 w-3" />
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Status Check Indicators */}
                         {isMe && (
                           <div className="self-center shrink-0 ml-2">
                             {isPending ? (

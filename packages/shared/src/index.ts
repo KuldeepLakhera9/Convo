@@ -18,6 +18,7 @@ export interface Message {
   content: string;
   sequenceId: number;
   createdAt: string;
+  updatedAt?: string; // Optional field indicating when the message was edited
   status: 'sent' | 'delivered' | 'read'; // Added delivery state tracking
   isPending?: boolean; // For client optimistic UI
   isFailed?: boolean;   // For client error UI
@@ -81,6 +82,23 @@ export type WsMessage =
         messageId?: string;
         upToSequenceId?: number;
         userId: string; // user whose status changed (the recipient of the message)
+      };
+    }
+  | {
+      type: 'edit_message';
+      payload: {
+        messageId: string;
+        conversationId: string;
+        content: string;
+      };
+    }
+  | {
+      type: 'message_edited';
+      payload: {
+        messageId: string;
+        conversationId: string;
+        content: string;
+        updatedAt: string;
       };
     }
   | {

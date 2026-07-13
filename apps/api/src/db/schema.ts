@@ -39,6 +39,7 @@ export const messages = pgTable('messages', {
   content: text('content').notNull(),
   sequenceId: integer('sequence_id').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }), // Track message edit timestamps
 }, (table) => {
   return {
     uniqueSeq: unique('unique_conversation_seq').on(table.conversationId, table.sequenceId),

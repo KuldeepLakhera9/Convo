@@ -181,6 +181,7 @@ router.get('/conversations/:id/messages', async (req: AuthenticatedRequest, res:
         content: messages.content,
         sequenceId: messages.sequenceId,
         createdAt: messages.createdAt,
+        updatedAt: messages.updatedAt,
         status: sql<'sent' | 'delivered' | 'read'>`COALESCE(${messageStatuses.status}, 'sent')`,
       })
       .from(messages)

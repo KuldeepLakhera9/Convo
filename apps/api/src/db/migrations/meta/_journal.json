@@ -15,6 +15,13 @@
       "when": 1783919286897,
       "tag": "0001_ordinary_ted_forrester",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783921706858,
+      "tag": "0002_superb_talisman",
+      "breakpoints": true
     }
   ]
 }

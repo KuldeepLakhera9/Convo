@@ -20,6 +20,12 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectAttempts = useRef(0);
   const onTokenExpiredRef = useRef(onTokenExpired);
+  
+  // Ref to track conversations without triggering WS reconnects
+  const conversationsRef = useRef<Conversation[]>([]);
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
 
   useEffect(() => {
     onTokenExpiredRef.current = onTokenExpired;
@@ -97,14 +103,12 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
         const matchSeq = upToSequenceId ? msg.sequenceId <= upToSequenceId : true;
 
         if (matchMessageId && matchSender && matchSeq) {
-          // Only advance status (sent -> delivered -> read)
           const currentStatus = msg.status || 'sent';
           if (
             (currentStatus === 'sent' && (status === 'delivered' || status === 'read')) ||
             (currentStatus === 'delivered' && status === 'read')
           ) {
             const updatedMsg = { ...msg, status };
-            // Save to IndexedDB asynchronously
             localDb.saveMessage(updatedMsg);
             return updatedMsg;
           }
@@ -150,7 +154,6 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
       setError(null);
       reconnectAttempts.current = 0;
 
-      // Resumable sync: send highest sequence ID per conversation
       setIsSyncing(true);
       try {
         const cachedConvs = await localDb.getConversations();
@@ -167,13 +170,12 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
           payload: { conversations: syncItems },
         }));
 
-        // Offline queueing: push unsent messages cached locally
         const unsent = await localDb.getUnsentMessages();
         for (const m of unsent) {
           ws.send(JSON.stringify({
             type: 'send_message',
             payload: {
-              id: m.id, // client UUID
+              id: m.id,
               conversationId: m.conversationId,
               content: m.content,
             },
@@ -190,14 +192,13 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
       try {
         const wsMsg: WsMessage = JSON.parse(event.data);
 
-        // 1. MESSAGE ACK (Sender receives server confirmation)
+        // 1. MESSAGE ACK
         if (wsMsg.type === 'message_ack') {
           const { tempId, message } = wsMsg.payload;
           
           await localDb.saveMessage(message);
           setMessages((prev) => {
             const list = prev[message.conversationId] || [];
-            // Update the optimistic pending message with database details
             return {
               ...prev,
               [message.conversationId]: list.map((msg) =>
@@ -207,7 +208,7 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
           });
         } 
         
-        // 2. NEW MESSAGE (Recipient receives message)
+        // 2. NEW MESSAGE
         else if (wsMsg.type === 'new_message') {
           const message = wsMsg.payload;
           
@@ -223,7 +224,6 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
             };
           });
 
-          // Send delivery/read status update back to server
           const isActive = message.conversationId === activeConversationId;
           const targetStatus = isActive ? 'read' : 'delivered';
 
@@ -236,15 +236,13 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
           );
         } 
         
-        // 3. SYNC REPLAY RESPONSE
+        // 3. SYNC RESPONSE
         else if (wsMsg.type === 'sync_response') {
           const { messages: replayedMessages } = wsMsg.payload;
           if (replayedMessages.length === 0) return;
 
-          // Save to local cache
           await localDb.saveMessages(replayedMessages);
 
-          // Group replayed messages by conversation
           const groups: Record<string, Message[]> = {};
           for (const msg of replayedMessages) {
             if (!groups[msg.conversationId]) {
@@ -253,7 +251,6 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
             groups[msg.conversationId].push(msg);
           }
 
-          // Update state and send delivery updates
           setMessages((prev) => {
             const newMap = { ...prev };
             for (const [convId, list] of Object.entries(groups)) {
@@ -264,7 +261,6 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
                 if (!merged.some((existing) => existing.id === m.id)) {
                   merged.push(m);
                 } else {
-                  // Replace placeholder with correct sync details
                   const idx = merged.findIndex((existing) => existing.id === m.id);
                   merged[idx] = m;
                 }
@@ -273,7 +269,6 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
               merged.sort((a, b) => a.sequenceId - b.sequenceId);
               newMap[convId] = merged;
 
-              // Send delivery check for messages we received where we are not the sender
               const receivedMsgs = list.filter((m) => m.senderId !== currentUserId);
               if (receivedMsgs.length > 0) {
                 const maxSeq = Math.max(...receivedMsgs.map((m) => m.sequenceId));
@@ -288,14 +283,44 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
           });
         } 
         
-        // 4. MESSAGE STATUS UPDATE (Broadcasted from recipient back to sender)
+        // 4. MESSAGE STATUS UPDATE (Sender receives delivery update, OR our own other tabs sync read receipts)
         else if (wsMsg.type === 'message_status_update') {
           const { conversationId, status, messageId, upToSequenceId, userId } = wsMsg.payload;
-          // Recipient (userId) updated the message status. Update the sender's local copy.
-          await updateLocalMessageStatus(conversationId, status, userId, upToSequenceId, messageId);
+          
+          // Determine who sent the messages that should be updated
+          // If the update was triggered by our own user on another tab: we read Bob's messages. Bob is the sender.
+          // If the update was triggered by Bob: Bob read Alice's messages. Alice is the sender.
+          const otherUser = conversationsRef.current.find((c) => c.id === conversationId)?.otherUser;
+          const targetSenderId = (userId === currentUserId) ? otherUser?.id : currentUserId;
+          
+          if (targetSenderId) {
+            await updateLocalMessageStatus(conversationId, status, targetSenderId, upToSequenceId, messageId);
+          }
+        }
+
+        // 5. MESSAGE EDITED
+        else if (wsMsg.type === 'message_edited') {
+          const { messageId, conversationId, content, updatedAt } = wsMsg.payload;
+          
+          setMessages((prev) => {
+            const list = prev[conversationId] || [];
+            const updatedList = list.map((msg) =>
+              msg.id === messageId ? { ...msg, content, updatedAt } : msg
+            );
+
+            const editedMsg = updatedList.find((m) => m.id === messageId);
+            if (editedMsg) {
+              localDb.saveMessage(editedMsg);
+            }
+
+            return {
+              ...prev,
+              [conversationId]: updatedList,
+            };
+          });
         }
         
-        // 5. SERVER ERROR
+        // 6. ERROR
         else if (wsMsg.type === 'error') {
           const { message, tempId } = wsMsg.payload;
           console.error('Server ws error:', message);
@@ -307,7 +332,6 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
                   const updatedList = list.map((msg) =>
                     msg.id === tempId ? { ...msg, isPending: false, isFailed: true } : msg
                   );
-                  // Update IndexedDB state
                   const failedMsg = updatedList.find((m) => m.id === tempId);
                   if (failedMsg) localDb.saveMessage(failedMsg);
 
@@ -331,9 +355,8 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
       setIsConnected(false);
 
       if (accessToken) {
-        // Exponential Backoff reconnection formula
         const backoffDelay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000) + Math.random() * 500;
-        console.log(`Reconnecting in ${(backoffDelay / 1000).toFixed(1)} seconds (attempt ${reconnectAttempts.current + 1})`);
+        console.log(`Reconnecting in ${(backoffDelay / 1000).toFixed(1)} seconds...`);
         
         reconnectAttempts.current += 1;
         
@@ -379,10 +402,8 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
   // Fetch messages when conversation changes
   useEffect(() => {
     if (activeConversationId && accessToken) {
-      // Fetch REST logs (updates cache and syncs history)
       fetchMessages(activeConversationId, accessToken);
       
-      // Auto-trigger read status update for unread messages in the active thread
       const currentMsgs = messages[activeConversationId] || [];
       const unreadFromOther = currentMsgs.filter((m) => m.senderId !== currentUserId && m.status !== 'read');
       if (unreadFromOther.length > 0) {
@@ -393,7 +414,7 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
     }
   }, [activeConversationId, accessToken, fetchMessages, currentUserId, sendStatusUpdate, updateLocalMessageStatus]);
 
-  // Send Message (Deduplication support + Local-First Write)
+  // Send Message
   const sendMessage = useCallback(async (content: string) => {
     if (!activeConversationId || !currentUserId || !content.trim()) return;
 
@@ -403,16 +424,14 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
       conversationId: activeConversationId,
       senderId: currentUserId,
       content: content.trim(),
-      sequenceId: Date.now(), // temporary sequence sort index
+      sequenceId: Date.now(),
       createdAt: new Date().toISOString(),
       status: 'sent',
       isPending: true,
     };
 
-    // Save to IndexedDB (local-first)
     await localDb.saveMessage(tempMessage);
 
-    // Update state
     setMessages((prev) => {
       const list = prev[activeConversationId] || [];
       return {
@@ -432,6 +451,22 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
       }));
     }
   }, [activeConversationId, currentUserId]);
+
+  // Edit Message (WebSocket push)
+  const editMessage = useCallback((messageId: string, content: string) => {
+    if (!activeConversationId || !content.trim()) return;
+
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'edit_message',
+        payload: {
+          messageId,
+          conversationId: activeConversationId,
+          content: content.trim(),
+        },
+      }));
+    }
+  }, [activeConversationId]);
 
   // Start Conversation
   const startConversation = useCallback(async (otherUserId: string) => {
@@ -469,6 +504,7 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
     isSyncing,
     error,
     sendMessage,
+    editMessage, // Exported to support message editing
     startConversation,
     refreshConversations: () => accessToken && fetchConversations(accessToken),
   };

@@ -49,7 +49,7 @@ export function initWebSocketServer(server: Server) {
       try {
         const parsedData: WsMessage = JSON.parse(data);
         
-        // 1. SEND MESSAGE (with Deduplication and Delivery tracking)
+        // 1. SEND MESSAGE
         if (parsedData.type === 'send_message') {
           const { id: messageId, conversationId, content } = parsedData.payload;
 
@@ -61,13 +61,13 @@ export function initWebSocketServer(server: Server) {
             return;
           }
 
-          // DEDUPLICATION: Check if client UUID already exists
+          // DEDUPLICATION
           const existingMsg = await db.query.messages.findFirst({
             where: eq(messages.id, messageId),
           });
 
           if (existingMsg) {
-            console.log(`Deduplication triggered: Message ${messageId} already exists. Resending ACK.`);
+            console.log(`Deduplication: Message ${messageId} already exists. Sending ACK.`);
             const statusRecord = await db.query.messageStatuses.findFirst({
               where: eq(messageStatuses.messageId, messageId),
             });
@@ -84,6 +84,7 @@ export function initWebSocketServer(server: Server) {
                   content: existingMsg.content,
                   sequenceId: existingMsg.sequenceId,
                   createdAt: existingMsg.createdAt.toISOString(),
+                  updatedAt: existingMsg.updatedAt?.toISOString(),
                   status: statusVal,
                 },
               },
@@ -91,7 +92,7 @@ export function initWebSocketServer(server: Server) {
             return;
           }
 
-          // Verify user belongs to conversation
+          // Verify membership
           const memberRecord = await db.query.conversationMembers.findFirst({
             where: and(
               eq(conversationMembers.conversationId, conversationId),
@@ -107,7 +108,6 @@ export function initWebSocketServer(server: Server) {
             return;
           }
 
-          // Find the recipient of the message
           const otherMember = await db.query.conversationMembers.findFirst({
             where: and(
               eq(conversationMembers.conversationId, conversationId),
@@ -123,7 +123,6 @@ export function initWebSocketServer(server: Server) {
             return;
           }
 
-          // Determine initial status based on recipient online state
           const recipientSockets = userSockets.get(otherMember.userId);
           const isRecipientOnline = recipientSockets && recipientSockets.size > 0;
           const initialStatus: 'sent' | 'delivered' = isRecipientOnline ? 'delivered' : 'sent';
@@ -132,18 +131,15 @@ export function initWebSocketServer(server: Server) {
           
           try {
             await db.transaction(async (tx) => {
-              // Lock conversation
               await tx.execute(
                 sql`SELECT 1 FROM conversations WHERE id = ${conversationId} FOR UPDATE`
               );
 
-              // Get max sequence ID
               const maxSeqQuery = await tx.execute(
                 sql`SELECT COALESCE(MAX(sequence_id), 0) as max_seq FROM messages WHERE conversation_id = ${conversationId}`
               );
               const nextSequenceId = Number(maxSeqQuery.rows[0]?.max_seq || 0) + 1;
 
-              // Insert message with client UUID
               const [insertedMsg] = await tx
                 .insert(messages)
                 .values({
@@ -155,7 +151,6 @@ export function initWebSocketServer(server: Server) {
                 })
                 .returning();
 
-              // Insert message status for the recipient
               await tx.insert(messageStatuses).values({
                 messageId: insertedMsg.id,
                 recipientId: otherMember.userId,
@@ -183,7 +178,7 @@ export function initWebSocketServer(server: Server) {
 
           if (!persistedMsg) return;
 
-          // ACK back to sender
+          // ACK back to sender (active socket)
           sendToSocket(ws, {
             type: 'message_ack',
             payload: {
@@ -192,7 +187,7 @@ export function initWebSocketServer(server: Server) {
             },
           });
 
-          // Forward to recipient if online
+          // Forward to recipient's active sessions
           if (isRecipientOnline) {
             for (const clientSocket of recipientSockets!) {
               if (clientSocket.readyState === WebSocket.OPEN) {
@@ -203,9 +198,22 @@ export function initWebSocketServer(server: Server) {
               }
             }
           }
+
+          // Forward to sender's OTHER active sessions/tabs (multi-session sync)
+          const senderOtherSockets = userSockets.get(userId);
+          if (senderOtherSockets) {
+            for (const sSocket of senderOtherSockets) {
+              if (sSocket !== ws && sSocket.readyState === WebSocket.OPEN) {
+                sendToSocket(sSocket, {
+                  type: 'new_message',
+                  payload: persistedMsg,
+                });
+              }
+            }
+          }
         }
         
-        // 2. SYNC REQUEST (for Resumable Cursors on reconnect)
+        // 2. SYNC REQUEST (Resumable Sync on reconnect)
         else if (parsedData.type === 'sync_request') {
           const { conversations: syncItems } = parsedData.payload;
           const allMissedMessages: Message[] = [];
@@ -213,7 +221,6 @@ export function initWebSocketServer(server: Server) {
           for (const item of syncItems) {
             const { conversationId, lastSequenceId } = item;
 
-            // Retrieve missed messages in this conversation
             const missedList = await db
               .select({
                 id: messages.id,
@@ -222,6 +229,7 @@ export function initWebSocketServer(server: Server) {
                 content: messages.content,
                 sequenceId: messages.sequenceId,
                 createdAt: messages.createdAt,
+                updatedAt: messages.updatedAt,
                 status: sql<'sent' | 'delivered' | 'read'>`COALESCE(${messageStatuses.status}, 'sent')`,
               })
               .from(messages)
@@ -234,7 +242,7 @@ export function initWebSocketServer(server: Server) {
               )
               .orderBy(messages.sequenceId);
 
-            // If we are the recipient of these missed messages, update their status to 'delivered'
+            // Update status to 'delivered' for messages sent by others
             const pendingDeliveredMsgIds = missedList
               .filter((m) => m.senderId !== userId && m.status === 'sent')
               .map((m) => m.id);
@@ -250,7 +258,6 @@ export function initWebSocketServer(server: Server) {
                   )
                 );
 
-              // Broadcast status update back to the sender
               const senderIds = Array.from(new Set(missedList.filter((m) => m.senderId !== userId).map((m) => m.senderId)));
               for (const senderId of senderIds) {
                 const senderSockets = userSockets.get(senderId);
@@ -269,7 +276,6 @@ export function initWebSocketServer(server: Server) {
                 }
               }
               
-              // Update status in local array representation
               for (const m of missedList) {
                 if (m.senderId !== userId && m.status === 'sent') {
                   m.status = 'delivered';
@@ -284,13 +290,13 @@ export function initWebSocketServer(server: Server) {
               content: m.content,
               sequenceId: m.sequenceId,
               createdAt: m.createdAt.toISOString(),
+              updatedAt: m.updatedAt?.toISOString(),
               status: m.status,
             }));
 
             allMissedMessages.push(...mappedList);
           }
 
-          // Return all replay messages
           sendToSocket(ws, {
             type: 'sync_response',
             payload: {
@@ -299,11 +305,10 @@ export function initWebSocketServer(server: Server) {
           });
         }
         
-        // 3. UPDATE STATUS (Client acknowledging delivery or reading messages)
+        // 3. UPDATE STATUS (Delivery / Read state logs)
         else if (parsedData.type === 'update_status') {
           const { conversationId, status, messageId, upToSequenceId } = parsedData.payload;
 
-          // Find other member (sender of the messages)
           const otherMember = await db.query.conversationMembers.findFirst({
             where: and(
               eq(conversationMembers.conversationId, conversationId),
@@ -314,7 +319,7 @@ export function initWebSocketServer(server: Server) {
           if (!otherMember) return;
 
           if (upToSequenceId) {
-            // Bulk update to read/delivered for all messages sent by other user up to sequenceId
+            // Bulk update ensuring database one-way state transitions (never downgrade from read -> delivered)
             await db.execute(sql`
               UPDATE message_statuses
               SET status = ${status}, updated_at = NOW()
@@ -330,19 +335,25 @@ export function initWebSocketServer(server: Server) {
                 )
             `);
 
-            // Broadcast the bulk status update to the sender (other user)
-            const senderSockets = userSockets.get(otherMember.userId);
-            if (senderSockets) {
-              for (const sSocket of senderSockets) {
-                sendToSocket(sSocket, {
-                  type: 'message_status_update',
-                  payload: {
-                    conversationId,
-                    status,
-                    userId,
-                    upToSequenceId,
-                  },
-                });
+            // MULTI-SESSION STATUS SYNC: Broadcast to both the partner and reader's own other active sessions
+            const targets = [userId, otherMember.userId];
+            for (const targetId of targets) {
+              const sockets = userSockets.get(targetId);
+              if (sockets) {
+                for (const socket of sockets) {
+                  // Skip the specific socket tab that initiated this read update
+                  if (targetId === userId && socket === ws) continue;
+
+                  sendToSocket(socket, {
+                    type: 'message_status_update',
+                    payload: {
+                      conversationId,
+                      status,
+                      userId, // Reader ID
+                      upToSequenceId,
+                    },
+                  });
+                }
               }
             }
           } else if (messageId) {
@@ -357,19 +368,88 @@ export function initWebSocketServer(server: Server) {
                 )
               );
 
-            // Broadcast to the sender
-            const senderSockets = userSockets.get(otherMember.userId);
-            if (senderSockets) {
-              for (const sSocket of senderSockets) {
-                sendToSocket(sSocket, {
-                  type: 'message_status_update',
-                  payload: {
-                    conversationId,
-                    status,
-                    userId,
-                    messageId,
-                  },
-                });
+            const targets = [userId, otherMember.userId];
+            for (const targetId of targets) {
+              const sockets = userSockets.get(targetId);
+              if (sockets) {
+                for (const socket of sockets) {
+                  if (targetId === userId && socket === ws) continue;
+
+                  sendToSocket(socket, {
+                    type: 'message_status_update',
+                    payload: {
+                      conversationId,
+                      status,
+                      userId,
+                      messageId,
+                    },
+                  });
+                }
+              }
+            }
+          }
+        }
+
+        // 4. EDIT MESSAGE (Verify sender, update DB, broadcast message_edited)
+        else if (parsedData.type === 'edit_message') {
+          const { messageId, conversationId, content } = parsedData.payload;
+
+          if (!messageId || !conversationId || !content.trim()) {
+            return;
+          }
+
+          // Verify message sender is the current user
+          const msgRecord = await db.query.messages.findFirst({
+            where: and(
+              eq(messages.id, messageId),
+              eq(messages.senderId, userId)
+            ),
+          });
+
+          if (!msgRecord) {
+            sendToSocket(ws, {
+              type: 'error',
+              payload: { message: 'Unauthorized message edit' },
+            });
+            return;
+          }
+
+          const updatedAtTime = new Date();
+          await db
+            .update(messages)
+            .set({
+              content: content.trim(),
+              updatedAt: updatedAtTime,
+            })
+            .where(eq(messages.id, messageId));
+
+          // Fetch recipient of the conversation
+          const otherMember = await db.query.conversationMembers.findFirst({
+            where: and(
+              eq(conversationMembers.conversationId, conversationId),
+              ne(conversationMembers.userId, userId)
+            ),
+          });
+
+          if (!otherMember) return;
+
+          // Broadcast message_edited to both members (all active sessions/tabs)
+          const membersToNotify = [userId, otherMember.userId];
+          for (const memberId of membersToNotify) {
+            const sockets = userSockets.get(memberId);
+            if (sockets) {
+              for (const socket of sockets) {
+                if (socket.readyState === WebSocket.OPEN) {
+                  sendToSocket(socket, {
+                    type: 'message_edited',
+                    payload: {
+                      messageId,
+                      conversationId,
+                      content: content.trim(),
+                      updatedAt: updatedAtTime.toISOString(),
+                    },
+                  });
+                }
               }
             }
           }
@@ -379,7 +459,7 @@ export function initWebSocketServer(server: Server) {
       }
     });
 
-    ws.on('close', () => {
+    ws.onclose = () => {
       console.log(`User disconnected: ${userId}`);
       const sockets = userSockets.get(userId);
       if (sockets) {
@@ -388,11 +468,11 @@ export function initWebSocketServer(server: Server) {
           userSockets.delete(userId);
         }
       }
-    });
+    };
 
-    ws.on('error', (err) => {
+    ws.onerror = (err) => {
       console.error(`Socket error for user ${userId}:`, err);
-    });
+    };
   });
 }
 
