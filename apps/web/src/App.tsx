@@ -423,10 +423,10 @@ export default function App() {
 
       {/* Ringing In Overlay Banner */}
       {callState === 'ringing_in' && (
-        <div className="w-full p-4 rounded-xl bg-[#ddfd53]/15 border border-[#ddfd53]/35 flex items-center justify-between text-xs text-[#ddfd53] tracking-wide transition-all duration-300 animate-pulse-subtle">
+        <div className="w-full p-4 rounded-xl bg-[#ddfd53]/15 border border-[#ddfd53]/35 flex items-center justify-between text-xs text-[#ddfd53] tracking-wide transition-all duration-300">
           <div className="flex items-center gap-3">
             <div className="h-8 w-8 rounded-full bg-[#ddfd53] text-[#0b0c0f] flex items-center justify-center font-bold">
-              <PhoneCall className="h-4.5 w-4.5 animate-bounce" />
+              <PhoneCall className="h-4.5 w-4.5 animate-pulse" />
             </div>
             <div>
               <span className="font-bold block">Incoming Video Call</span>
@@ -654,7 +654,7 @@ export default function App() {
                   <div className="flex-1 flex items-center justify-center relative my-4 overflow-hidden rounded-2xl bg-[#131419] border border-[#24262d]">
                     {callState === 'ringing_out' && (
                       <div className="flex flex-col items-center gap-4 text-center">
-                        <div className="h-16 w-16 rounded-full bg-[#ddfd53]/10 border border-[#ddfd53]/20 flex items-center justify-center animate-ping text-[#ddfd53]">
+                        <div className="h-16 w-16 rounded-full bg-[#ddfd53]/10 border border-[#ddfd53]/20 flex items-center justify-center call-glow text-[#ddfd53]">
                           <Phone className="h-8 w-8" />
                         </div>
                         <div>

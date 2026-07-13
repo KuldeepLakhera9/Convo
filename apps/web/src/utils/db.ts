@@ -1,7 +1,7 @@
 import type { Message, Conversation } from '@convo/shared';
 
 const DB_NAME = 'convo_db';
-const DB_VERSION = 2; // Incremented database schema version for E2EE keystores
+const DB_VERSION = 3; // v3: clear ratchet sessions after kdfStep label fix
 
 class LocalDbManager {
   private db: IDBDatabase | null = null;
@@ -23,9 +23,10 @@ class LocalDbManager {
         resolve();
       };
 
-      request.onupgradeneeded = () => {
+      request.onupgradeneeded = (event) => {
         const database = request.result;
-        
+        const oldVersion = event.oldVersion;
+
         if (!database.objectStoreNames.contains('conversations')) {
           database.createObjectStore('conversations', { keyPath: 'id' });
         }
@@ -41,7 +42,11 @@ class LocalDbManager {
           database.createObjectStore('device_keys', { keyPath: 'id' });
         }
 
-        // Create E2EE Ratchet sessions object store
+        // v3: Wipe and recreate ratchet_sessions — old sessions used broken kdfStep labels
+        // and cannot decrypt correctly. Force fresh key agreement on next message.
+        if (oldVersion < 3 && database.objectStoreNames.contains('ratchet_sessions')) {
+          database.deleteObjectStore('ratchet_sessions');
+        }
         if (!database.objectStoreNames.contains('ratchet_sessions')) {
           database.createObjectStore('ratchet_sessions', { keyPath: 'sessionId' });
         }
@@ -160,6 +165,21 @@ class LocalDbManager {
     });
   }
 
+  getMessage(id: string): Promise<Message | null> {
+    return new Promise((resolve, reject) => {
+      try {
+        if (!this.db) throw new Error('Database not initialized');
+        const transaction = this.db.transaction('messages', 'readonly');
+        const store = transaction.objectStore('messages');
+        const request = store.get(id);
+        request.onsuccess = () => resolve(request.result ?? null);
+        request.onerror = () => reject(request.error);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
   getUnsentMessages(): Promise<Message[]> {
     return new Promise((resolve, reject) => {
       try {
@@ -249,6 +269,21 @@ class LocalDbManager {
         const request = store.get(sessionId);
         request.onsuccess = () => resolve(request.result || null);
         request.onerror = () => reject(request.error);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  clearMessages(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      try {
+        if (!this.db) throw new Error('Database not initialized');
+        const transaction = this.db.transaction(['messages', 'ratchet_sessions'], 'readwrite');
+        transaction.objectStore('messages').clear();
+        transaction.objectStore('ratchet_sessions').clear();
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
       } catch (err) {
         reject(err);
       }

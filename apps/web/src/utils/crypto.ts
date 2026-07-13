@@ -1,6 +1,12 @@
-// Browser WebCrypto E2EE implementation of X3DH & Double Ratchet
+// Browser WebCrypto E2EE implementation
+// Architecture: Per-message X3DH (ECIES-style)
+// - Sender generates a fresh ephemeral key for EVERY message
+// - Message key is derived directly from the X3DH shared secret
+// - No ratchet chain state needed — eliminates all session sync bugs
+// - Each message is independently decryptable with only IK+SPK (no history required)
 
-// 1. Buffer Helper functions
+// ─── Buffer helpers ───────────────────────────────────────────────────────────
+
 function bufferToBase64(buf: ArrayBuffer): string {
   const bin = String.fromCharCode(...new Uint8Array(buf));
   return btoa(bin);
@@ -9,219 +15,139 @@ function bufferToBase64(buf: ArrayBuffer): string {
 function base64ToBuffer(b64: string): ArrayBuffer {
   const bin = atob(b64);
   const buf = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) {
-    buf[i] = bin.charCodeAt(i);
-  }
+  for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
   return buf.buffer;
 }
 
-// 2. Public Key import/export (SPKI format)
+// ─── Public Key import/export (SPKI) ─────────────────────────────────────────
+
 export async function exportPublicKey(key: CryptoKey): Promise<string> {
-  const exported = await window.crypto.subtle.exportKey('spki', key);
-  return bufferToBase64(exported);
+  return bufferToBase64(await window.crypto.subtle.exportKey('spki', key));
 }
 
 export async function importPublicKey(b64: string): Promise<CryptoKey> {
-  const buf = base64ToBuffer(b64);
-  return await window.crypto.subtle.importKey(
-    'spki',
-    buf,
+  return window.crypto.subtle.importKey(
+    'spki', base64ToBuffer(b64),
     { name: 'ECDH', namedCurve: 'P-256' },
-    true,
-    []
+    true, []
   );
 }
 
-// 3. Generate local device Identity and Signed Prekey pairs
+// ─── Device key generation ────────────────────────────────────────────────────
+
 export async function generateDeviceKeyPair() {
-  const ik = await window.crypto.subtle.generateKey(
-    { name: 'ECDH', namedCurve: 'P-256' },
-    true, // Must be extractable so we can export public key
-    ['deriveKey', 'deriveBits']
-  );
-  const spk = await window.crypto.subtle.generateKey(
-    { name: 'ECDH', namedCurve: 'P-256' },
-    true,
-    ['deriveKey', 'deriveBits']
-  );
+  const params = { name: 'ECDH', namedCurve: 'P-256' };
+  const ik = await window.crypto.subtle.generateKey(params, true, ['deriveKey', 'deriveBits']);
+  const spk = await window.crypto.subtle.generateKey(params, true, ['deriveKey', 'deriveBits']);
   return { ik, spk };
 }
 
-// Compute ECDH Shared Secret
+// ─── ECDH shared secret ───────────────────────────────────────────────────────
+
 async function computeDH(privateKey: CryptoKey, publicKey: CryptoKey): Promise<Uint8Array> {
   const bits = await window.crypto.subtle.deriveBits(
-    { name: 'ECDH', public: publicKey },
-    privateKey,
-    256
+    { name: 'ECDH', public: publicKey }, privateKey, 256
   );
   return new Uint8Array(bits);
 }
 
-// 4. X3DH Session Agreement - Initiation side (Alice)
+// ─── Derive AES message key from combined DH material ────────────────────────
+
+async function deriveMessageKey(
+  dh1: Uint8Array, dh2: Uint8Array, dh3: Uint8Array
+): Promise<Uint8Array> {
+  const combined = new Uint8Array(dh1.length + dh2.length + dh3.length);
+  combined.set(dh1, 0);
+  combined.set(dh2, dh1.length);
+  combined.set(dh3, dh1.length + dh2.length);
+
+  const masterKey = await window.crypto.subtle.importKey(
+    'raw', combined.buffer as ArrayBuffer, 'HKDF', false, ['deriveBits']
+  );
+
+  const keyBits = await window.crypto.subtle.deriveBits(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: new Uint8Array(32),
+      info: new TextEncoder().encode('convo-message-key-v1'),
+    },
+    masterKey,
+    256
+  );
+
+  return new Uint8Array(keyBits);
+}
+
+// ─── X3DH Sender: encrypt for a recipient ────────────────────────────────────
+// Returns a fresh message key + the ephemeral public key the receiver needs.
+// Call this once per recipient device per message.
+
 export async function x3dhInitiate(
   localIK: { privateKey: CryptoKey },
   remoteIKPubB64: string,
   remoteSPKPubB64: string
-) {
-  // Generate Ephemeral Key (EK)
+): Promise<{ messageKey: Uint8Array; ephemeralPublicKey: string }> {
+  // Generate a brand-new ephemeral key for THIS message
   const ek = await window.crypto.subtle.generateKey(
-    { name: 'ECDH', namedCurve: 'P-256' },
-    true,
-    ['deriveKey', 'deriveBits']
+    { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey', 'deriveBits']
   );
 
   const remoteIKPub = await importPublicKey(remoteIKPubB64);
   const remoteSPKPub = await importPublicKey(remoteSPKPubB64);
 
-  // Compute DH agreements
-  const dh1 = await computeDH(localIK.privateKey, remoteSPKPub);
-  const dh2 = await computeDH(ek.privateKey, remoteIKPub);
-  const dh3 = await computeDH(ek.privateKey, remoteSPKPub);
+  // Three DH agreements (X3DH)
+  const dh1 = await computeDH(localIK.privateKey, remoteSPKPub);   // IK_A · SPK_B
+  const dh2 = await computeDH(ek.privateKey, remoteIKPub);          // EK_A · IK_B
+  const dh3 = await computeDH(ek.privateKey, remoteSPKPub);         // EK_A · SPK_B
 
-  // Combine derived DH bytes
-  const combined = new Uint8Array(dh1.length + dh2.length + dh3.length);
-  combined.set(dh1, 0);
-  combined.set(dh2, dh1.length);
-  combined.set(dh3, dh1.length + dh2.length);
+  const messageKey = await deriveMessageKey(dh1, dh2, dh3);
+  const ephemeralPublicKey = await exportPublicKey(ek.publicKey);
 
-  // HKDF to derive Root Key (RK)
-  const masterKey = await window.crypto.subtle.importKey(
-    'raw',
-    combined.buffer as ArrayBuffer,
-    'HKDF',
-    false,
-    ['deriveBits']
-  );
-
-  const rkBits = await window.crypto.subtle.deriveBits(
-    {
-      name: 'HKDF',
-      hash: 'SHA-256',
-      salt: new Uint8Array(32),
-      info: new TextEncoder().encode('Convo-E2EE-Master'),
-    },
-    masterKey,
-    256
-  );
-
-  const ekPubB64 = await exportPublicKey(ek.publicKey);
-
-  return {
-    rootKey: new Uint8Array(rkBits),
-    ephemeralPublicKey: ekPubB64,
-  };
+  return { messageKey, ephemeralPublicKey };
 }
 
-// X3DH Session Agreement - Receiving side (Bob)
+// ─── X3DH Receiver: derive the same message key ──────────────────────────────
+// Uses the ephemeralPublicKey embedded in the message payload.
+// Produces the identical message key as the sender — no session state required.
+
 export async function x3dhReceive(
   localIK: { privateKey: CryptoKey },
   localSPK: { privateKey: CryptoKey },
   remoteIKPubB64: string,
   remoteEKPubB64: string
-) {
+): Promise<Uint8Array> {
   const remoteIKPub = await importPublicKey(remoteIKPubB64);
   const remoteEKPub = await importPublicKey(remoteEKPubB64);
 
-  // Compute Bob's DH matches
-  const dh1 = await computeDH(localSPK.privateKey, remoteIKPub);
-  const dh2 = await computeDH(localIK.privateKey, remoteEKPub);
-  const dh3 = await computeDH(localSPK.privateKey, remoteEKPub);
+  // Mirror of sender's three DH agreements (ECDH is commutative)
+  const dh1 = await computeDH(localSPK.privateKey, remoteIKPub);   // SPK_B · IK_A
+  const dh2 = await computeDH(localIK.privateKey, remoteEKPub);    // IK_B · EK_A
+  const dh3 = await computeDH(localSPK.privateKey, remoteEKPub);   // SPK_B · EK_A
 
-  const combined = new Uint8Array(dh1.length + dh2.length + dh3.length);
-  combined.set(dh1, 0);
-  combined.set(dh2, dh1.length);
-  combined.set(dh3, dh1.length + dh2.length);
-
-  const masterKey = await window.crypto.subtle.importKey(
-    'raw',
-    combined.buffer as ArrayBuffer,
-    'HKDF',
-    false,
-    ['deriveBits']
-  );
-
-  const rkBits = await window.crypto.subtle.deriveBits(
-    {
-      name: 'HKDF',
-      hash: 'SHA-256',
-      salt: new Uint8Array(32),
-      info: new TextEncoder().encode('Convo-E2EE-Master'),
-    },
-    masterKey,
-    256
-  );
-
-  return new Uint8Array(rkBits);
+  return deriveMessageKey(dh1, dh2, dh3);
 }
 
-// 5. Symmetric KDF chain advancement
-export async function kdfStep(
-  chainKey: Uint8Array,
-  label: string
-): Promise<{ nextChainKey: Uint8Array; messageKey: Uint8Array }> {
-  const key = await window.crypto.subtle.importKey(
-    'raw',
-    chainKey.buffer as ArrayBuffer,
-    'HKDF',
-    false,
-    ['deriveBits']
-  );
+// ─── AES-GCM Encrypt ─────────────────────────────────────────────────────────
 
-  const nextCkBits = await window.crypto.subtle.deriveBits(
-    {
-      name: 'HKDF',
-      hash: 'SHA-256',
-      salt: new Uint8Array(32),
-      info: new TextEncoder().encode(`${label}-next-ck`),
-    },
-    key,
-    256
-  );
-
-  const mkBits = await window.crypto.subtle.deriveBits(
-    {
-      name: 'HKDF',
-      hash: 'SHA-256',
-      salt: new Uint8Array(32),
-      info: new TextEncoder().encode(`${label}-message-key`),
-    },
-    key,
-    256
-  );
-
-  return {
-    nextChainKey: new Uint8Array(nextCkBits),
-    messageKey: new Uint8Array(mkBits),
-  };
-}
-
-// 6. Symmetric AES-GCM Encrypt
 export async function encryptSymmetric(
   plaintext: string,
   keyBytes: Uint8Array
 ): Promise<{ ciphertext: string; iv: string }> {
   const iv = window.crypto.getRandomValues(new Uint8Array(12));
   const cryptoKey = await window.crypto.subtle.importKey(
-    'raw',
-    keyBytes.buffer as ArrayBuffer,
-    { name: 'AES-GCM' },
-    false,
-    ['encrypt']
+    'raw', keyBytes.buffer as ArrayBuffer, { name: 'AES-GCM' }, false, ['encrypt']
   );
-
   const ciphertextBuf = await window.crypto.subtle.encrypt(
     { name: 'AES-GCM', iv },
     cryptoKey,
     new TextEncoder().encode(plaintext)
   );
-
-  return {
-    ciphertext: bufferToBase64(ciphertextBuf),
-    iv: bufferToBase64(iv.buffer),
-  };
+  return { ciphertext: bufferToBase64(ciphertextBuf), iv: bufferToBase64(iv.buffer) };
 }
 
-// Symmetric AES-GCM Decrypt
+// ─── AES-GCM Decrypt ─────────────────────────────────────────────────────────
+
 export async function decryptSymmetric(
   ciphertextB64: string,
   ivB64: string,
@@ -229,20 +155,11 @@ export async function decryptSymmetric(
 ): Promise<string> {
   const ciphertext = base64ToBuffer(ciphertextB64);
   const iv = base64ToBuffer(ivB64);
-  
   const cryptoKey = await window.crypto.subtle.importKey(
-    'raw',
-    keyBytes.buffer as ArrayBuffer,
-    { name: 'AES-GCM' },
-    false,
-    ['decrypt']
+    'raw', keyBytes.buffer as ArrayBuffer, { name: 'AES-GCM' }, false, ['decrypt']
   );
-
   const decryptedBuf = await window.crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv },
-    cryptoKey,
-    ciphertext
+    { name: 'AES-GCM', iv }, cryptoKey, ciphertext
   );
-
   return new TextDecoder().decode(decryptedBuf);
 }
