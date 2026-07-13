@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace=@convo/shared & npm run dev --workspace=api & npm run dev --workspace=web",
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build --workspace=@convo/shared && npm run build --workspace=api && npm run build --workspace=web",
     "db:generate": "npm run db:generate --workspace=apps/api",
     "db:migrate": "npm run db:migrate --workspace=apps/api"
   }
