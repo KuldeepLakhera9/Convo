@@ -157,7 +157,7 @@ export function useChat({
         if (!bundle) {
           const token = accessTokenRef.current;
           if (token) {
-            const res = await fetch(
+            const res = await apiFetch(
               `/api/chat/conversations/${msg.conversationId}/prekeys`,
               {
                 headers: { Authorization: `Bearer ${token}` },
@@ -434,7 +434,7 @@ export function useChat({
       const keys = deviceKeysRef.current;
       if (!devId || !keys) return;
       try {
-        const res = await fetch(
+        const res = await apiFetch(
           `/api/chat/conversations/${conversationId}/messages`,
           {
             headers: { Authorization: `Bearer ${token}` },
@@ -458,9 +458,12 @@ export function useChat({
   const fetchPrekeyBundles = useCallback(
     async (convId: string, token: string) => {
       try {
-        const res = await fetch(`/api/chat/conversations/${convId}/prekeys`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await apiFetch(
+          `/api/chat/conversations/${convId}/prekeys`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          },
+        );
         if (res.ok) {
           const bundles: PrekeyBundle[] = await res.json();
           prekeyBundlesRef.current = bundles;
@@ -998,9 +1001,12 @@ export function useChat({
     // ── Eagerly fetch prekey bundles if the ref is stale/empty ──────────────
     if (prekeyBundlesRef.current.length === 0) {
       try {
-        const res = await fetch(`/api/chat/conversations/${convId}/prekeys`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await apiFetch(
+          `/api/chat/conversations/${convId}/prekeys`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          },
+        );
         if (res.ok) {
           prekeyBundlesRef.current = await res.json();
         }

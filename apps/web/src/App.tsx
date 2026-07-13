@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useChat } from './hooks/useChat';
+import React, { useState, useEffect, useRef } from "react";
+import { useChat } from "./hooks/useChat";
 import {
   MessageSquare,
   Send,
@@ -33,12 +33,12 @@ import {
   MicOff,
   VideoOff,
   Volume2,
-} from 'lucide-react';
-import { apiFetch } from './utils/api';
+} from "lucide-react";
+import { apiFetch } from "./utils/api";
 
 function parseJwt(token: string) {
   try {
-    return JSON.parse(window.atob(token.split('.')[1]));
+    return JSON.parse(window.atob(token.split(".")[1]));
   } catch (e) {
     return null;
   }
@@ -48,18 +48,20 @@ export default function App() {
   // Auth state
   const [user, setUser] = useState<{ id: string; email: string } | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
   const [bootLoading, setBootLoading] = useState(true);
 
   // User search/new conversation list
   const [showUserSearch, setShowUserSearch] = useState(false);
-  const [usersList, setUsersList] = useState<{ id: string; email: string }[]>([]);
+  const [usersList, setUsersList] = useState<{ id: string; email: string }[]>(
+    [],
+  );
   const [searchLoading, setSearchLoading] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Right sidebar details toggle
   const [showRightSidebar, setShowRightSidebar] = useState(true);
@@ -67,12 +69,12 @@ export default function App() {
   const [linksOpen, setLinksOpen] = useState(false);
 
   // Messages input
-  const [inputMessage, setInputMessage] = useState('');
+  const [inputMessage, setInputMessage] = useState("");
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   // Message Editing state
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
-  const [editContent, setEditContent] = useState('');
+  const [editContent, setEditContent] = useState("");
 
   // Video streams HTML elements references
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -81,13 +83,13 @@ export default function App() {
   // Trigger token refresh
   const handleTokenExpired = async (): Promise<string | null> => {
     try {
-      const res = await apiFetch('/api/auth/refresh', { method: 'POST' });
+      const res = await apiFetch("/api/auth/refresh", { method: "POST" });
       if (res.ok) {
         const data = await res.json();
         setAccessToken(data.accessToken);
         const decoded = parseJwt(data.accessToken);
         if (decoded) {
-          const emailValue = localStorage.getItem('userEmail') || 'User';
+          const emailValue = localStorage.getItem("userEmail") || "User";
           setUser({ id: decoded.userId, email: emailValue });
         }
         return data.accessToken;
@@ -151,25 +153,25 @@ export default function App() {
   const handleLogoutLocal = () => {
     setUser(null);
     setAccessToken(null);
-    localStorage.removeItem('userEmail');
+    localStorage.removeItem("userEmail");
   };
 
   // Silent refresh on boot
   useEffect(() => {
     const checkAuthOnBoot = async () => {
       try {
-        const res = await apiFetch('/api/auth/refresh', { method: 'POST' });
+        const res = await apiFetch("/api/auth/refresh", { method: "POST" });
         if (res.ok) {
           const data = await res.json();
           setAccessToken(data.accessToken);
           const decoded = parseJwt(data.accessToken);
           if (decoded) {
-            const savedEmail = localStorage.getItem('userEmail') || 'User';
+            const savedEmail = localStorage.getItem("userEmail") || "User";
             setUser({ id: decoded.userId, email: savedEmail });
           }
         }
       } catch (err) {
-        console.log('No existing session.');
+        console.log("No existing session.");
       } finally {
         setBootLoading(false);
       }
@@ -180,16 +182,19 @@ export default function App() {
   // Set up refresh interval (every 14 minutes)
   useEffect(() => {
     if (!accessToken) return;
-    const interval = setInterval(() => {
-      handleTokenExpired();
-    }, 14 * 60 * 1000);
+    const interval = setInterval(
+      () => {
+        handleTokenExpired();
+      },
+      14 * 60 * 1000,
+    );
 
     return () => clearInterval(interval);
   }, [accessToken]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [activeMessages]);
 
   // Fetch users for start conversation dialog
@@ -198,7 +203,7 @@ export default function App() {
     setShowUserSearch(true);
     setSearchLoading(true);
     try {
-      const res = await apiFetch('/api/chat/users', {
+      const res = await apiFetch("/api/chat/users", {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (res.ok) {
@@ -216,41 +221,42 @@ export default function App() {
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
-      setAuthError('All fields are required');
+      setAuthError("All fields are required");
       return;
     }
     setAuthError(null);
     setAuthLoading(true);
 
-    const urlPath = authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
+    const urlPath =
+      authMode === "login" ? "/api/auth/login" : "/api/auth/register";
 
     try {
-      const res = await fetch(urlPath, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await apiFetch(urlPath, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        setAuthError(data.error || 'Authentication failed');
+        setAuthError(data.error || "Authentication failed");
         setAuthLoading(false);
         return;
       }
 
-      if (authMode === 'login') {
+      if (authMode === "login") {
         setUser(data.user);
         setAccessToken(data.accessToken);
-        localStorage.setItem('userEmail', data.user.email);
-        setEmail('');
-        setPassword('');
+        localStorage.setItem("userEmail", data.user.email);
+        setEmail("");
+        setPassword("");
       } else {
-        setAuthMode('login');
-        setAuthError('Registration successful! Please log in.');
+        setAuthMode("login");
+        setAuthError("Registration successful! Please log in.");
       }
     } catch (err) {
-      setAuthError('Network error. Check backend connection.');
+      setAuthError("Network error. Check backend connection.");
     } finally {
       setAuthLoading(false);
     }
@@ -258,7 +264,7 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      await apiFetch('/api/auth/logout', { method: 'POST' });
+      await apiFetch("/api/auth/logout", { method: "POST" });
     } catch (err) {
       console.error(err);
     } finally {
@@ -270,7 +276,7 @@ export default function App() {
     e.preventDefault();
     if (!inputMessage.trim()) return;
     sendMessage(inputMessage);
-    setInputMessage('');
+    setInputMessage("");
   };
 
   // Handle Edit submit
@@ -281,16 +287,18 @@ export default function App() {
     setEditingMessageId(null);
   };
 
-  const activeConversation = conversations.find((c) => c.id === activeConversationId);
+  const activeConversation = conversations.find(
+    (c) => c.id === activeConversationId,
+  );
 
   // Filter conversations based on query
   const filteredConversations = conversations.filter((conv) =>
-    conv.otherUser?.email.toLowerCase().includes(searchQuery.toLowerCase())
+    conv.otherUser?.email.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
   // Get initial letters from email
   const getInitials = (email: string) => {
-    return email.split('@')[0].substring(0, 2).toUpperCase();
+    return email.split("@")[0].substring(0, 2).toUpperCase();
   };
 
   if (bootLoading) {
@@ -298,7 +306,9 @@ export default function App() {
       <div className="flex h-screen w-screen items-center justify-center bg-[#0b0c0f] text-slate-100">
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="h-10 w-10 animate-spin text-[#ddfd53]" />
-          <p className="text-xs text-slate-400 font-semibold tracking-wider uppercase">Loading Workspace...</p>
+          <p className="text-xs text-slate-400 font-semibold tracking-wider uppercase">
+            Loading Workspace...
+          </p>
         </div>
       </div>
     );
@@ -313,17 +323,23 @@ export default function App() {
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#ddfd53] text-[#0b0c0f] shadow-lg shadow-[#ddfd53]/10 mb-3">
               <span className="font-black text-xl">S</span>
             </div>
-            <h1 className="text-xl font-bold tracking-tight text-white m-0">Sign In to Convo</h1>
-            <p className="text-[#989ba2] text-xs mt-1">Enterprise real-time communications</p>
+            <h1 className="text-xl font-bold tracking-tight text-white m-0">
+              Sign In to Convo
+            </h1>
+            <p className="text-[#989ba2] text-xs mt-1">
+              Enterprise real-time communications
+            </p>
           </div>
 
           <form onSubmit={handleAuthSubmit} className="space-y-5">
             {authError && (
-              <div className={`p-3 rounded-lg flex items-start gap-2.5 text-xs ${
-                authError.includes('successful')
-                  ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
-                  : 'bg-red-500/10 border border-red-500/30 text-red-400'
-              }`}>
+              <div
+                className={`p-3 rounded-lg flex items-start gap-2.5 text-xs ${
+                  authError.includes("successful")
+                    ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400"
+                    : "bg-red-500/10 border border-red-500/30 text-red-400"
+                }`}
+              >
                 <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                 <span>{authError}</span>
               </div>
@@ -364,10 +380,10 @@ export default function App() {
             >
               {authLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
-              ) : authMode === 'login' ? (
-                'Sign In'
+              ) : authMode === "login" ? (
+                "Sign In"
               ) : (
-                'Create Account'
+                "Create Account"
               )}
             </button>
           </form>
@@ -375,14 +391,14 @@ export default function App() {
           <div className="mt-6 text-center">
             <button
               onClick={() => {
-                setAuthMode(authMode === 'login' ? 'register' : 'login');
+                setAuthMode(authMode === "login" ? "register" : "login");
                 setAuthError(null);
               }}
               className="text-xs text-[#ddfd53] hover:underline font-bold transition-colors cursor-pointer"
             >
-              {authMode === 'login'
+              {authMode === "login"
                 ? "Don't have an account? Sign up"
-                : 'Already have an account? Sign in'}
+                : "Already have an account? Sign in"}
             </button>
           </div>
         </div>
@@ -398,14 +414,17 @@ export default function App() {
         <div className="w-full py-2 px-4 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-between text-xs text-amber-400 tracking-wide transition-all duration-300">
           <div className="flex items-center gap-2 font-medium">
             <WifiOff className="h-4 w-4 animate-pulse" />
-            <span>Connection lost. Typing messages will queue offline and automatically sync upon reconnecting.</span>
+            <span>
+              Connection lost. Typing messages will queue offline and
+              automatically sync upon reconnecting.
+            </span>
           </div>
           <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-amber-500/20">
             Offline Mode
           </span>
         </div>
       )}
-      
+
       {isSyncing && (
         <div className="w-full py-2 px-4 rounded-xl bg-indigo-500/10 border border-indigo-500/25 flex items-center justify-between text-xs text-indigo-400 tracking-wide transition-all duration-300">
           <div className="flex items-center gap-2 font-medium">
@@ -423,7 +442,7 @@ export default function App() {
       )}
 
       {/* Ringing In Overlay Banner */}
-      {callState === 'ringing_in' && (
+      {callState === "ringing_in" && (
         <div className="w-full p-4 rounded-xl bg-[#ddfd53]/15 border border-[#ddfd53]/35 flex items-center justify-between text-xs text-[#ddfd53] tracking-wide transition-all duration-300">
           <div className="flex items-center gap-3">
             <div className="h-8 w-8 rounded-full bg-[#ddfd53] text-[#0b0c0f] flex items-center justify-center font-bold">
@@ -431,7 +450,9 @@ export default function App() {
             </div>
             <div>
               <span className="font-bold block">Incoming Video Call</span>
-              <span className="text-[10px] text-slate-300">Active secure call session request</span>
+              <span className="text-[10px] text-slate-300">
+                Active secure call session request
+              </span>
             </div>
           </div>
           <div className="flex items-center gap-2.5">
@@ -512,34 +533,40 @@ export default function App() {
             <div className="px-2 py-1 text-[10px] font-bold text-[#5c5e66] uppercase tracking-wider">
               Direct Messages
             </div>
-            
+
             {filteredConversations.length === 0 ? (
-              <div className="text-center py-8 text-xs text-[#5c5e66]">No chats found</div>
+              <div className="text-center py-8 text-xs text-[#5c5e66]">
+                No chats found
+              </div>
             ) : (
               filteredConversations.map((conv) => {
                 const isActive = conv.id === activeConversationId;
-                const userInitials = getInitials(conv.otherUser?.email || 'User');
+                const userInitials = getInitials(
+                  conv.otherUser?.email || "User",
+                );
                 return (
                   <button
                     key={conv.id}
                     onClick={() => setActiveConversationId(conv.id)}
                     className={`w-full flex items-center gap-3 rounded-xl p-3 text-left transition-all border cursor-pointer ${
                       isActive
-                        ? 'bg-[#24262d] border-[#24262d]'
-                        : 'bg-transparent border-transparent hover:bg-[#18191e]/50'
+                        ? "bg-[#24262d] border-[#24262d]"
+                        : "bg-transparent border-transparent hover:bg-[#18191e]/50"
                     }`}
                   >
                     <div className="h-9 w-9 rounded-full bg-[#18191e] border border-[#24262d] flex items-center justify-center font-bold text-[10px] text-slate-300 relative shrink-0">
                       {userInitials}
                       <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 border-2 border-[#131419]" />
                     </div>
-                    
+
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-semibold text-white truncate pr-1">
-                          {conv.otherUser?.email.split('@')[0]}
+                          {conv.otherUser?.email.split("@")[0]}
                         </span>
-                        <span className="text-[9px] text-[#5c5e66]">Active</span>
+                        <span className="text-[9px] text-[#5c5e66]">
+                          Active
+                        </span>
                       </div>
                       <p className="text-[10px] text-[#989ba2] truncate mt-0.5">
                         {conv.otherUser?.email}
@@ -558,9 +585,11 @@ export default function App() {
               </div>
               <div className="min-w-0">
                 <span className="block text-xs font-bold text-white truncate">
-                  {user.email.split('@')[0]}
+                  {user.email.split("@")[0]}
                 </span>
-                <span className="block text-[10px] text-[#989ba2] truncate">{user.email}</span>
+                <span className="block text-[10px] text-[#989ba2] truncate">
+                  {user.email}
+                </span>
               </div>
             </div>
             <button
@@ -581,16 +610,20 @@ export default function App() {
               <header className="h-16 border-b border-[#24262d] px-6 flex items-center justify-between shrink-0 bg-[#18191e]/15">
                 <div className="flex items-center gap-3">
                   <div className="h-9 w-9 rounded-full bg-[#18191e] border border-[#24262d] flex items-center justify-center font-bold text-xs text-white">
-                    {getInitials(activeConversation.otherUser?.email || 'User')}
+                    {getInitials(activeConversation.otherUser?.email || "User")}
                   </div>
                   <div>
                     <h2 className="text-xs font-bold text-white m-0">
                       {activeConversation.otherUser?.email}
                     </h2>
                     <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className={`h-1.5 w-1.5 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse-subtle'}`} />
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${isConnected ? "bg-emerald-500" : "bg-amber-500 animate-pulse-subtle"}`}
+                      />
                       <span className="text-[9px] text-[#989ba2] mr-2">
-                        {isConnected ? 'Active channel' : 'Offline • attempting reconnect...'}
+                        {isConnected
+                          ? "Active channel"
+                          : "Offline • attempting reconnect..."}
                       </span>
                       <span className="inline-flex items-center gap-1 rounded bg-[#ddfd53]/10 px-1.5 py-0.5 text-[8px] font-bold text-[#ddfd53] border border-[#ddfd53]/20 uppercase tracking-wider">
                         <Shield className="h-2 w-2" /> E2EE Secure
@@ -609,13 +642,15 @@ export default function App() {
                       className="w-full rounded-lg bg-[#18191e] border border-[#24262d] pl-8 pr-3 py-1.5 text-[10px] text-white focus:outline-none focus:border-[#ddfd53] transition-colors"
                     />
                   </div>
-                  <button className="text-[#989ba2] hover:text-white cursor-pointer"><Bell className="h-4 w-4" /></button>
-                  
+                  <button className="text-[#989ba2] hover:text-white cursor-pointer">
+                    <Bell className="h-4 w-4" />
+                  </button>
+
                   {/* WebRTC calling initiation button */}
                   <button
                     onClick={() => startCall(activeConversation.id)}
                     title="Start Video Call"
-                    disabled={callState !== 'idle'}
+                    disabled={callState !== "idle"}
                     className="text-[#989ba2] hover:text-[#ddfd53] disabled:opacity-30 disabled:hover:text-[#989ba2] cursor-pointer"
                   >
                     <Video className="h-4.5 w-4.5" />
@@ -623,7 +658,7 @@ export default function App() {
 
                   <button
                     onClick={() => setShowRightSidebar(!showRightSidebar)}
-                    className={`text-[#989ba2] hover:text-white cursor-pointer ${showRightSidebar ? 'text-white' : ''}`}
+                    className={`text-[#989ba2] hover:text-white cursor-pointer ${showRightSidebar ? "text-white" : ""}`}
                   >
                     <Users className="h-4 w-4" />
                   </button>
@@ -631,96 +666,124 @@ export default function App() {
               </header>
 
               {/* ACTIVE WEBRTC VIDEO CALL WINDOW OVERLAY */}
-              {callState !== 'idle' && activeCallConversationId === activeConversation.id && (
-                <div className="absolute inset-0 bg-[#0b0c0f] z-40 flex flex-col justify-between p-6">
-                  {/* Call Header info bar */}
-                  <div className="flex items-center justify-between z-10">
-                    <div className="flex items-center gap-2">
-                      <Shield className="h-4 w-4 text-[#ddfd53]" />
-                      <span className="text-xs font-bold text-white uppercase tracking-wider">E2EE Call Connection</span>
-                    </div>
-
-                    {/* Connection quality status tag */}
-                    <div className="flex items-center gap-2 rounded bg-black/60 px-3 py-1.5 border border-[#24262d]">
-                      <span className={`h-2 w-2 rounded-full ${
-                        callQuality === 'good' ? 'bg-emerald-500' : callQuality === 'poor' ? 'bg-amber-500 animate-pulse' : 'bg-red-500 animate-ping'
-                      }`} />
-                      <span className="text-[10px] font-bold text-slate-300 capitalize">
-                        {callQuality === 'good' ? 'Stable Connection' : callQuality === 'poor' ? 'Low Bandwidth' : 'Connecting...'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Calling Status view / streams box */}
-                  <div className="flex-1 flex items-center justify-center relative my-4 overflow-hidden rounded-2xl bg-[#131419] border border-[#24262d]">
-                    {callState === 'ringing_out' && (
-                      <div className="flex flex-col items-center gap-4 text-center">
-                        <div className="h-16 w-16 rounded-full bg-[#ddfd53]/10 border border-[#ddfd53]/20 flex items-center justify-center call-glow text-[#ddfd53]">
-                          <Phone className="h-8 w-8" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold text-white">Calling...</p>
-                          <p className="text-xs text-[#989ba2] mt-1">Waiting for participant to answer...</p>
-                        </div>
+              {callState !== "idle" &&
+                activeCallConversationId === activeConversation.id && (
+                  <div className="absolute inset-0 bg-[#0b0c0f] z-40 flex flex-col justify-between p-6">
+                    {/* Call Header info bar */}
+                    <div className="flex items-center justify-between z-10">
+                      <div className="flex items-center gap-2">
+                        <Shield className="h-4 w-4 text-[#ddfd53]" />
+                        <span className="text-xs font-bold text-white uppercase tracking-wider">
+                          E2EE Call Connection
+                        </span>
                       </div>
-                    )}
 
-                    {/* Remote stream video window (connected call) */}
-                    <video
-                      ref={remoteVideoRef}
-                      autoPlay
-                      playsInline
-                      className={`w-full h-full object-cover bg-black ${callState === 'connected' ? 'block' : 'hidden'}`}
-                    />
+                      {/* Connection quality status tag */}
+                      <div className="flex items-center gap-2 rounded bg-black/60 px-3 py-1.5 border border-[#24262d]">
+                        <span
+                          className={`h-2 w-2 rounded-full ${
+                            callQuality === "good"
+                              ? "bg-emerald-500"
+                              : callQuality === "poor"
+                                ? "bg-amber-500 animate-pulse"
+                                : "bg-red-500 animate-ping"
+                          }`}
+                        />
+                        <span className="text-[10px] font-bold text-slate-300 capitalize">
+                          {callQuality === "good"
+                            ? "Stable Connection"
+                            : callQuality === "poor"
+                              ? "Low Bandwidth"
+                              : "Connecting..."}
+                        </span>
+                      </div>
+                    </div>
 
-                    {/* Floating corner local user video stream */}
-                    <video
-                      ref={localVideoRef}
-                      autoPlay
-                      playsInline
-                      muted
-                      className={`absolute bottom-4 right-4 w-40 h-28 object-cover rounded-xl border-2 border-white/10 shadow-2xl bg-[#131419] z-20 ${
-                        callState === 'connected' || callState === 'ringing_out' ? 'block' : 'hidden'
-                      }`}
-                    />
+                    {/* Calling Status view / streams box */}
+                    <div className="flex-1 flex items-center justify-center relative my-4 overflow-hidden rounded-2xl bg-[#131419] border border-[#24262d]">
+                      {callState === "ringing_out" && (
+                        <div className="flex flex-col items-center gap-4 text-center">
+                          <div className="h-16 w-16 rounded-full bg-[#ddfd53]/10 border border-[#ddfd53]/20 flex items-center justify-center call-glow text-[#ddfd53]">
+                            <Phone className="h-8 w-8" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-white">
+                              Calling...
+                            </p>
+                            <p className="text-xs text-[#989ba2] mt-1">
+                              Waiting for participant to answer...
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Remote stream video window (connected call) */}
+                      <video
+                        ref={remoteVideoRef}
+                        autoPlay
+                        playsInline
+                        className={`w-full h-full object-cover bg-black ${callState === "connected" ? "block" : "hidden"}`}
+                      />
+
+                      {/* Floating corner local user video stream */}
+                      <video
+                        ref={localVideoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className={`absolute bottom-4 right-4 w-40 h-28 object-cover rounded-xl border-2 border-white/10 shadow-2xl bg-[#131419] z-20 ${
+                          callState === "connected" ||
+                          callState === "ringing_out"
+                            ? "block"
+                            : "hidden"
+                        }`}
+                      />
+                    </div>
+
+                    {/* Floating call control bar */}
+                    <div className="flex items-center justify-center gap-4 z-10">
+                      {/* Mic mute toggler */}
+                      <button
+                        onClick={toggleMic}
+                        className={`h-11 w-11 rounded-full flex items-center justify-center transition-all cursor-pointer border ${
+                          isMicMuted
+                            ? "bg-red-500/20 border-red-500/40 text-red-400"
+                            : "bg-[#18191e] border-[#24262d] text-[#989ba2] hover:text-white"
+                        }`}
+                      >
+                        {isMicMuted ? (
+                          <MicOff className="h-5 w-5" />
+                        ) : (
+                          <Mic className="h-5 w-5" />
+                        )}
+                      </button>
+
+                      {/* Hangup calling sessions */}
+                      <button
+                        onClick={hangupCall}
+                        className="h-12 w-12 rounded-full bg-rose-600 hover:bg-rose-700 text-white flex items-center justify-center transition-colors cursor-pointer shadow-lg shadow-rose-600/20"
+                      >
+                        <PhoneOff className="h-5.5 w-5.5" />
+                      </button>
+
+                      {/* Cam mute toggler */}
+                      <button
+                        onClick={toggleCam}
+                        className={`h-11 w-11 rounded-full flex items-center justify-center transition-all cursor-pointer border ${
+                          isCamMuted
+                            ? "bg-red-500/20 border-red-500/40 text-red-400"
+                            : "bg-[#18191e] border-[#24262d] text-[#989ba2] hover:text-white"
+                        }`}
+                      >
+                        {isCamMuted ? (
+                          <VideoOff className="h-5 w-5" />
+                        ) : (
+                          <Video className="h-5 w-5" />
+                        )}
+                      </button>
+                    </div>
                   </div>
-
-                  {/* Floating call control bar */}
-                  <div className="flex items-center justify-center gap-4 z-10">
-                    {/* Mic mute toggler */}
-                    <button
-                      onClick={toggleMic}
-                      className={`h-11 w-11 rounded-full flex items-center justify-center transition-all cursor-pointer border ${
-                        isMicMuted
-                          ? 'bg-red-500/20 border-red-500/40 text-red-400'
-                          : 'bg-[#18191e] border-[#24262d] text-[#989ba2] hover:text-white'
-                      }`}
-                    >
-                      {isMicMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-                    </button>
-
-                    {/* Hangup calling sessions */}
-                    <button
-                      onClick={hangupCall}
-                      className="h-12 w-12 rounded-full bg-rose-600 hover:bg-rose-700 text-white flex items-center justify-center transition-colors cursor-pointer shadow-lg shadow-rose-600/20"
-                    >
-                      <PhoneOff className="h-5.5 w-5.5" />
-                    </button>
-
-                    {/* Cam mute toggler */}
-                    <button
-                      onClick={toggleCam}
-                      className={`h-11 w-11 rounded-full flex items-center justify-center transition-all cursor-pointer border ${
-                        isCamMuted
-                          ? 'bg-red-500/20 border-red-500/40 text-red-400'
-                          : 'bg-[#18191e] border-[#24262d] text-[#989ba2] hover:text-white'
-                      }`}
-                    >
-                      {isCamMuted ? <VideoOff className="h-5 w-5" /> : <Video className="h-5 w-5" />}
-                    </button>
-                  </div>
-                </div>
-              )}
+                )}
 
               {/* Chat Messages Log */}
               <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
@@ -731,7 +794,8 @@ export default function App() {
                       src="/Users/kuldeeplakhera/.gemini/antigravity-ide/brain/b913b2bd-a9aa-4e7a-9ace-95252c505a7b/initial_page_1783918540828.png"
                       alt="Shared banner"
                       onError={(e) => {
-                        e.currentTarget.src = "https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=600&auto=format&fit=crop&q=60";
+                        e.currentTarget.src =
+                          "https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=600&auto=format&fit=crop&q=60";
                       }}
                       className="w-full h-full object-cover opacity-60"
                     />
@@ -739,7 +803,9 @@ export default function App() {
                       <span className="text-[10px] font-bold bg-[#ddfd53] text-[#0b0c0f] px-2 py-0.5 rounded-full uppercase tracking-wider">
                         Shared Banner
                       </span>
-                      <h4 className="text-xs font-bold text-white mt-1">Convo secure workspace space initialized</h4>
+                      <h4 className="text-xs font-bold text-white mt-1">
+                        Convo secure workspace space initialized
+                      </h4>
                     </div>
                   </div>
                 </div>
@@ -754,51 +820,77 @@ export default function App() {
 
                 {activeMessages.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-10 text-center">
-                    <p className="text-xs text-[#5c5e66]">No messages yet. Type in the input below to begin chat.</p>
+                    <p className="text-xs text-[#5c5e66]">
+                      No messages yet. Type in the input below to begin chat.
+                    </p>
                   </div>
                 ) : (
                   activeMessages.map((msg) => {
                     const isMe = msg.senderId === user.id;
                     const isPending = msg.isPending;
                     const isFailed = msg.isFailed;
-                    const initials = isMe ? getInitials(user.email) : getInitials(activeConversation.otherUser?.email || 'User');
+                    const initials = isMe
+                      ? getInitials(user.email)
+                      : getInitials(
+                          activeConversation.otherUser?.email || "User",
+                        );
                     const isEditing = editingMessageId === msg.id;
-                    const isUndecryptable = msg.content.startsWith('🔒');
-                    const isMissedCall = msg.content === '📞 Missed Call';
+                    const isUndecryptable = msg.content.startsWith("🔒");
+                    const isMissedCall = msg.content === "📞 Missed Call";
 
                     return (
-                      <div key={msg.id} className="flex items-start gap-3.5 group relative">
-                        <div className={`h-8 w-8 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 border ${
-                          isMe ? 'bg-[#ddfd53] text-[#0b0c0f] border-[#ddfd53]/10' : 'bg-[#18191e] text-slate-300 border-[#24262d]'
-                        }`}>
+                      <div
+                        key={msg.id}
+                        className="flex items-start gap-3.5 group relative"
+                      >
+                        <div
+                          className={`h-8 w-8 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 border ${
+                            isMe
+                              ? "bg-[#ddfd53] text-[#0b0c0f] border-[#ddfd53]/10"
+                              : "bg-[#18191e] text-slate-300 border-[#24262d]"
+                          }`}
+                        >
                           {initials}
                         </div>
 
                         <div className="flex-1 min-w-0">
                           <div className="flex items-baseline gap-2">
                             <span className="text-xs font-bold text-white hover:underline cursor-pointer">
-                              {isMe ? user.email.split('@')[0] : activeConversation.otherUser?.email.split('@')[0]}
+                              {isMe
+                                ? user.email.split("@")[0]
+                                : activeConversation.otherUser?.email.split(
+                                    "@",
+                                  )[0]}
                             </span>
                             <span className="text-[9px] text-[#5c5e66]">
                               {new Date(msg.createdAt).toLocaleTimeString([], {
-                                hour: '2-digit',
-                                minute: '2-digit',
+                                hour: "2-digit",
+                                minute: "2-digit",
                               })}
                             </span>
-                            
+
                             {msg.updatedAt && (
-                              <span className="text-[9px] text-[#5c5e66] italic" title={`Edited at ${new Date(msg.updatedAt).toLocaleString()}`}>
+                              <span
+                                className="text-[9px] text-[#5c5e66] italic"
+                                title={`Edited at ${new Date(msg.updatedAt).toLocaleString()}`}
+                              >
                                 (edited)
                               </span>
                             )}
 
                             <span className="text-[9px] font-mono text-[#ddfd53]/60 bg-[#ddfd53]/5 px-1.5 py-0.5 rounded border border-[#ddfd53]/10">
-                              #{msg.sequenceId > 0 && msg.sequenceId < 1e11 ? msg.sequenceId : 'pending'}
+                              #
+                              {msg.sequenceId > 0 && msg.sequenceId < 1e11
+                                ? msg.sequenceId
+                                : "pending"}
                             </span>
                           </div>
 
                           {isEditing ? (
-                            <form onSubmit={(e) => handleEditSubmit(e, msg.id)} className="flex items-center gap-2 mt-1.5 max-w-xl">
+                            <form
+                              onSubmit={(e) => handleEditSubmit(e, msg.id)}
+                              className="flex items-center gap-2 mt-1.5 max-w-xl"
+                            >
                               <input
                                 type="text"
                                 value={editContent}
@@ -821,15 +913,19 @@ export default function App() {
                               </button>
                             </form>
                           ) : (
-                            <div className={`text-xs mt-1 break-words leading-relaxed whitespace-pre-wrap ${
-                              isPending ? 'opacity-50 italic text-[#f1f5f9]' : ''
-                            } ${isFailed ? 'text-red-400' : ''} ${
-                              isUndecryptable 
-                                ? 'text-amber-500/90 italic font-medium bg-amber-500/5 border border-amber-500/10 px-2 py-1 rounded-lg inline-block' 
-                                : isMissedCall
-                                ? 'text-rose-400/95 font-semibold bg-rose-500/5 border border-rose-500/10 px-3 py-1.5 rounded-xl inline-flex items-center gap-2 mt-1.5 shadow-sm'
-                                : 'text-[#f1f5f9]'
-                            }`}>
+                            <div
+                              className={`text-xs mt-1 break-words leading-relaxed whitespace-pre-wrap ${
+                                isPending
+                                  ? "opacity-50 italic text-[#f1f5f9]"
+                                  : ""
+                              } ${isFailed ? "text-red-400" : ""} ${
+                                isUndecryptable
+                                  ? "text-amber-500/90 italic font-medium bg-amber-500/5 border border-amber-500/10 px-2 py-1 rounded-lg inline-block"
+                                  : isMissedCall
+                                    ? "text-rose-400/95 font-semibold bg-rose-500/5 border border-rose-500/10 px-3 py-1.5 rounded-xl inline-flex items-center gap-2 mt-1.5 shadow-sm"
+                                    : "text-[#f1f5f9]"
+                              }`}
+                            >
                               {isMissedCall ? (
                                 <>
                                   <PhoneOff className="h-3.5 w-3.5 text-rose-500 animate-pulse" />
@@ -842,20 +938,25 @@ export default function App() {
                           )}
                         </div>
 
-                        {isMe && !isPending && !isFailed && !isEditing && !isUndecryptable && !isMissedCall && (
-                          <div className="absolute right-12 top-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center bg-[#131419] border border-[#24262d] rounded-lg px-1 py-0.5 shadow-md">
-                            <button
-                              onClick={() => {
-                                setEditingMessageId(msg.id);
-                                setEditContent(msg.content);
-                              }}
-                              title="Edit Message"
-                              className="text-[#989ba2] hover:text-[#ddfd53] p-1 transition-colors cursor-pointer"
-                            >
-                              <Edit2 className="h-3 w-3" />
-                            </button>
-                          </div>
-                        )}
+                        {isMe &&
+                          !isPending &&
+                          !isFailed &&
+                          !isEditing &&
+                          !isUndecryptable &&
+                          !isMissedCall && (
+                            <div className="absolute right-12 top-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center bg-[#131419] border border-[#24262d] rounded-lg px-1 py-0.5 shadow-md">
+                              <button
+                                onClick={() => {
+                                  setEditingMessageId(msg.id);
+                                  setEditContent(msg.content);
+                                }}
+                                title="Edit Message"
+                                className="text-[#989ba2] hover:text-[#ddfd53] p-1 transition-colors cursor-pointer"
+                              >
+                                <Edit2 className="h-3 w-3" />
+                              </button>
+                            </div>
+                          )}
 
                         {isMe && (
                           <div className="self-center shrink-0 ml-2">
@@ -863,12 +964,15 @@ export default function App() {
                               <Loader2 className="h-3.5 w-3.5 animate-spin text-[#ddfd53]" />
                             ) : isFailed ? (
                               <AlertCircle className="h-3.5 w-3.5 text-red-500" />
-                            ) : msg.status === 'read' ? (
+                            ) : msg.status === "read" ? (
                               <div className="flex items-center" title="Read">
                                 <CheckCheck className="h-4 w-4 text-[#ddfd53]" />
                               </div>
-                            ) : msg.status === 'delivered' ? (
-                              <div className="flex items-center" title="Delivered">
+                            ) : msg.status === "delivered" ? (
+                              <div
+                                className="flex items-center"
+                                title="Delivered"
+                              >
                                 <CheckCheck className="h-4 w-4 text-[#989ba2]" />
                               </div>
                             ) : (
@@ -887,15 +991,21 @@ export default function App() {
 
               {/* Input Message panel */}
               <div className="p-4 border-t border-[#24262d] bg-[#131419]/35 shrink-0">
-                <form onSubmit={handleSend} className="max-w-4xl mx-auto flex items-center gap-3 rounded-2xl bg-[#18191e] border border-[#24262d] px-4 py-2">
-                  <button type="button" className="text-[#989ba2] hover:text-white p-1.5 rounded-lg transition-colors cursor-pointer">
+                <form
+                  onSubmit={handleSend}
+                  className="max-w-4xl mx-auto flex items-center gap-3 rounded-2xl bg-[#18191e] border border-[#24262d] px-4 py-2"
+                >
+                  <button
+                    type="button"
+                    className="text-[#989ba2] hover:text-white p-1.5 rounded-lg transition-colors cursor-pointer"
+                  >
                     <Paperclip className="h-4.5 w-4.5" />
                   </button>
                   <input
                     type="text"
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
-                    placeholder={`Write an encrypted message to ${activeConversation.otherUser?.email.split('@')[0]}...`}
+                    placeholder={`Write an encrypted message to ${activeConversation.otherUser?.email.split("@")[0]}...`}
                     className="flex-1 bg-transparent border-none py-2 text-xs text-white placeholder-[#5c5e66] focus:outline-none custom-input"
                   />
                   <button
@@ -913,9 +1023,12 @@ export default function App() {
               <div className="h-14 w-14 rounded-2xl bg-[#18191e] border border-[#24262d] flex items-center justify-center mb-4">
                 <MessageSquare className="h-6 w-6 text-[#ddfd53]" />
               </div>
-              <h2 className="text-sm font-bold text-white m-0">No active thread</h2>
+              <h2 className="text-sm font-bold text-white m-0">
+                No active thread
+              </h2>
               <p className="text-xs text-[#989ba2] max-w-xs mt-1.5 leading-relaxed">
-                Select a conversation in the directory list, or click the **`+`** icon to search and initiate a discussion.
+                Select a conversation in the directory list, or click the
+                **`+`** icon to search and initiate a discussion.
               </p>
             </div>
           )}
@@ -953,10 +1066,12 @@ export default function App() {
                       {getInitials(activeConversation.otherUser?.email)}
                     </div>
                     <span className="text-xs font-semibold text-slate-300 truncate">
-                      {activeConversation.otherUser?.email.split('@')[0]}
+                      {activeConversation.otherUser?.email.split("@")[0]}
                     </span>
                   </div>
-                  <span className="text-[9px] font-bold text-[#5c5e66] uppercase">Member</span>
+                  <span className="text-[9px] font-bold text-[#5c5e66] uppercase">
+                    Member
+                  </span>
                 </div>
 
                 <div className="flex items-center justify-between">
@@ -965,10 +1080,12 @@ export default function App() {
                       {getInitials(user.email)}
                     </div>
                     <span className="text-xs font-semibold text-slate-300 truncate">
-                      {user.email.split('@')[0]} (You)
+                      {user.email.split("@")[0]} (You)
                     </span>
                   </div>
-                  <span className="text-[9px] font-bold text-[#ddfd53] uppercase">Admin</span>
+                  <span className="text-[9px] font-bold text-[#ddfd53] uppercase">
+                    Admin
+                  </span>
                 </div>
               </div>
             </div>
@@ -979,9 +1096,13 @@ export default function App() {
                 className="w-full flex items-center justify-between p-4 text-xs font-bold text-white hover:bg-[#18191e]/40 transition-colors cursor-pointer"
               >
                 <span>Files</span>
-                {filesOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                {filesOpen ? (
+                  <ChevronUp className="h-4 w-4" />
+                ) : (
+                  <ChevronDown className="h-4 w-4" />
+                )}
               </button>
-              
+
               {filesOpen && (
                 <div className="px-4 pb-4 space-y-2">
                   <div className="flex items-center gap-2.5 rounded-lg bg-[#18191e]/40 p-2 border border-[#24262d]/50 text-left">
@@ -989,18 +1110,26 @@ export default function App() {
                       <FileText className="h-4 w-4 text-indigo-400" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-[10px] font-semibold text-slate-300 truncate">project_spec.pdf</p>
-                      <p className="text-[9px] text-[#5c5e66]">1.2 MB • PDF Document</p>
+                      <p className="text-[10px] font-semibold text-slate-300 truncate">
+                        project_spec.pdf
+                      </p>
+                      <p className="text-[9px] text-[#5c5e66]">
+                        1.2 MB • PDF Document
+                      </p>
                     </div>
                   </div>
-                  
+
                   <div className="flex items-center gap-2.5 rounded-lg bg-[#18191e]/40 p-2 border border-[#24262d]/50 text-left">
                     <div className="h-7 w-7 rounded bg-[#24262d] flex items-center justify-center shrink-0">
                       <Image className="h-4 w-4 text-emerald-400" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-[10px] font-semibold text-slate-300 truncate">design_reference.png</p>
-                      <p className="text-[9px] text-[#5c5e66]">3.4 MB • PNG Image</p>
+                      <p className="text-[10px] font-semibold text-slate-300 truncate">
+                        design_reference.png
+                      </p>
+                      <p className="text-[9px] text-[#5c5e66]">
+                        3.4 MB • PNG Image
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -1013,7 +1142,11 @@ export default function App() {
                 className="w-full flex items-center justify-between p-4 text-xs font-bold text-white hover:bg-[#18191e]/40 transition-colors cursor-pointer"
               >
                 <span>Shared links</span>
-                {linksOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                {linksOpen ? (
+                  <ChevronUp className="h-4 w-4" />
+                ) : (
+                  <ChevronDown className="h-4 w-4" />
+                )}
               </button>
 
               {linksOpen && (
@@ -1057,7 +1190,9 @@ export default function App() {
                 <Loader2 className="h-6 w-6 animate-spin text-[#ddfd53]" />
               </div>
             ) : usersList.length === 0 ? (
-              <p className="text-center text-xs text-[#5c5e66] py-6">No other users found.</p>
+              <p className="text-center text-xs text-[#5c5e66] py-6">
+                No other users found.
+              </p>
             ) : (
               <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1">
                 {usersList.map((usr) => (
