@@ -34,6 +34,7 @@ import {
   VideoOff,
   Volume2,
 } from 'lucide-react';
+import { apiFetch } from './utils/api';
 
 function parseJwt(token: string) {
   try {
@@ -80,7 +81,7 @@ export default function App() {
   // Trigger token refresh
   const handleTokenExpired = async (): Promise<string | null> => {
     try {
-      const res = await fetch('/api/auth/refresh', { method: 'POST' });
+      const res = await apiFetch('/api/auth/refresh', { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
         setAccessToken(data.accessToken);
@@ -157,7 +158,7 @@ export default function App() {
   useEffect(() => {
     const checkAuthOnBoot = async () => {
       try {
-        const res = await fetch('/api/auth/refresh', { method: 'POST' });
+        const res = await apiFetch('/api/auth/refresh', { method: 'POST' });
         if (res.ok) {
           const data = await res.json();
           setAccessToken(data.accessToken);
@@ -197,7 +198,7 @@ export default function App() {
     setShowUserSearch(true);
     setSearchLoading(true);
     try {
-      const res = await fetch('/api/chat/users', {
+      const res = await apiFetch('/api/chat/users', {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (res.ok) {
@@ -257,7 +258,7 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      await apiFetch('/api/auth/logout', { method: 'POST' });
     } catch (err) {
       console.error(err);
     } finally {

@@ -9,6 +9,7 @@ import {
   encryptSymmetric,
   decryptSymmetric,
 } from '../utils/crypto';
+import { apiFetch } from '../utils/api';
 
 interface UseChatProps {
   accessToken: string | null;
@@ -292,7 +293,7 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
 
   const fetchConversations = useCallback(async (token: string) => {
     try {
-      const res = await fetch('/api/chat/conversations', { headers: { Authorization: `Bearer ${token}` } });
+      const res = await apiFetch('/api/chat/conversations', { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) {
         const data: Conversation[] = await res.json();
         setConversations(data);
@@ -385,7 +386,7 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
       try {
         const ikPub = await exportPublicKey(deviceKeys.ik.publicKey);
         const spkPub = await exportPublicKey(deviceKeys.spk.publicKey);
-        await fetch('/api/chat/prekeys', {
+        await apiFetch('/api/chat/prekeys', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
           body: JSON.stringify({ deviceId: localDeviceId, identityKey: ikPub, signedPrekey: spkPub }),
@@ -403,7 +404,11 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
       socketRef.current.close();
     }
 
-    const ws = new WebSocket(`ws://localhost:3002?token=${tokenToUse}`);
+    // In dev: VITE_API_URL is not set, so use localhost via Vite proxy base
+    // In prod: VITE_API_URL is set to the Railway HTTPS URL, switch http→ws and https→wss
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3002';
+    const wsUrl = apiUrl.replace(/^http/, 'ws');
+    const ws = new WebSocket(`${wsUrl}?token=${tokenToUse}`);
     socketRef.current = ws;
 
     ws.onopen = async () => {
@@ -795,7 +800,7 @@ export function useChat({ accessToken, currentUserId, onTokenExpired }: UseChatP
     const token = accessTokenRef.current;
     if (!token) return;
     try {
-      const res = await fetch('/api/chat/conversations', {
+      const res = await apiFetch('/api/chat/conversations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ otherUserId }),
