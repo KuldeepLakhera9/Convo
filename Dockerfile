@@ -24,5 +24,6 @@ COPY --from=builder /app /app
 
 EXPOSE 3002
 
-# Run database migrations and start application
-CMD ["npm", "run", "start", "--workspace=api"]
+# Apply any pending schema migrations before accepting API traffic.
+# This is required for fresh managed databases, including Render Postgres.
+CMD ["sh", "-c", "npm run db:migrate --workspace=api && npm run start --workspace=api"]
